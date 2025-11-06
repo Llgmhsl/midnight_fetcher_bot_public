@@ -33,9 +33,14 @@ export interface DevFeeCache {
 }
 
 export interface DevFeeApiResponse {
-  devAddress: string;
-  devAddressIndex: number;
+  devAddress?: string; // Legacy single address (for backwards compatibility)
+  devAddressIndex?: number; // Legacy single address index
   isNewAssignment: boolean;
+  addresses: Array<{
+    devAddress: string;
+    devAddressIndex: number;
+    registered: boolean;
+  }>;
 }
 
 export class DevFeeManager {
@@ -117,7 +122,8 @@ export class DevFeeManager {
   }
 
   /**
-   * Fetch dev fee address from API
+   * Fetch dev fee address from API (legacy method - prefer using prefetchAddressPool + getDevFeeAddress)
+   * NOTE: This method is deprecated and only kept for backwards compatibility
    */
   async fetchDevFeeAddress(): Promise<string> {
     if (!this.isEnabled()) {
@@ -140,7 +146,15 @@ export class DevFeeManager {
         }
       );
 
-      const { devAddress, devAddressIndex, isNewAssignment } = response.data;
+      // API now returns all 10 addresses - use the first one for backwards compatibility
+      const addressesData = response.data.addresses;
+      if (!addressesData || addressesData.length === 0) {
+        throw new Error('API returned no addresses');
+      }
+
+      const firstAddress = addressesData[0];
+      const devAddress = firstAddress.devAddress;
+      const devAddressIndex = firstAddress.devAddressIndex;
 
       // Validate address format (should start with tnight1 or addr1)
       if (!devAddress.startsWith('tnight1') && !devAddress.startsWith('addr1')) {
@@ -157,7 +171,7 @@ export class DevFeeManager {
       delete this.cache.lastFetchError;
       this.saveCache();
 
-      console.log(`[DevFee] Fetched dev fee address: ${devAddress} (index: ${devAddressIndex}, new assignment: ${isNewAssignment})`);
+      console.log(`[DevFee] Fetched dev fee address: ${devAddress} (index: ${devAddressIndex})`);
       return devAddress;
 
     } catch (error: any) {
@@ -180,6 +194,7 @@ export class DevFeeManager {
   /**
    * Pre-fetch 10 dev fee addresses and store them in the pool
    * Called at mining start
+   * NOTE: API now returns all 10 addresses in a single call
    */
   async prefetchAddressPool(): Promise<boolean> {
     if (!this.isEnabled()) {
@@ -187,67 +202,78 @@ export class DevFeeManager {
       return false;
     }
 
-    console.log('[DevFee] Pre-fetching 10 dev fee addresses...');
-    const addresses: DevFeeAddress[] = [];
+    console.log('[DevFee] Fetching 10 dev fee addresses from API...');
 
-    for (let i = 0; i < 10; i++) {
-      try {
-        console.log(`[DevFee] Fetching address ${i + 1}/10...`);
-        const response = await axios.post<DevFeeApiResponse>(
-          this.config.apiUrl,
-          {
-            clientId: this.config.clientId,
-            clientType: 'desktop'
-          },
-          {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 10000,
-          }
-        );
-
-        const { devAddress, devAddressIndex } = response.data;
-
-        // Validate address format
-        if (!devAddress.startsWith('tnight1') && !devAddress.startsWith('addr1')) {
-          console.error(`[DevFee] Invalid address format at ${i + 1}/10: ${devAddress}`);
-          continue;
+    try {
+      const response = await axios.post<DevFeeApiResponse>(
+        this.config.apiUrl,
+        {
+          clientId: this.config.clientId,
+          clientType: 'desktop'
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000,
         }
+      );
 
-        addresses.push({
-          address: devAddress,
-          addressIndex: devAddressIndex,
-          fetchedAt: Date.now(),
-          usedCount: 0,
-        });
+      // API now returns all 10 addresses in the 'addresses' array
+      const addressesData = response.data.addresses;
 
-        console.log(`[DevFee] ✓ Address ${i + 1}/10 fetched: ${devAddress}`);
-
-        // Small delay between requests
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-      } catch (error: any) {
-        const errorMsg = error.response?.data?.message || error.message;
-        console.error(`[DevFee] Failed to fetch address ${i + 1}/10:`, errorMsg);
+      if (!addressesData || addressesData.length !== 10) {
+        console.error(`[DevFee] ✗ API returned ${addressesData?.length || 0}/10 addresses - dev fee DISABLED for this session`);
+        this.cache.addressPool = [];
+        this.cache.poolFetchedAt = undefined;
+        this.cache.lastFetchError = `API returned ${addressesData?.length || 0}/10 addresses`;
+        this.saveCache();
+        return false;
       }
-    }
 
-    if (addresses.length < 10) {
-      console.error(`[DevFee] ✗ Only fetched ${addresses.length}/10 addresses - dev fee DISABLED for this session`);
+      // Convert to DevFeeAddress format
+      const addresses: DevFeeAddress[] = addressesData.map(addr => ({
+        address: addr.devAddress,
+        addressIndex: addr.devAddressIndex,
+        fetchedAt: Date.now(),
+        usedCount: 0,
+      }));
+
+      // Validate all addresses
+      for (let i = 0; i < addresses.length; i++) {
+        const addr = addresses[i];
+        if (!addr.address.startsWith('tnight1') && !addr.address.startsWith('addr1')) {
+          console.error(`[DevFee] ✗ Invalid address format at index ${i}: ${addr.address} - dev fee DISABLED`);
+          this.cache.addressPool = [];
+          this.cache.poolFetchedAt = undefined;
+          this.cache.lastFetchError = `Invalid address format at index ${i}`;
+          this.saveCache();
+          return false;
+        }
+      }
+
+      console.log(`[DevFee] ✓ All 10 addresses validated successfully`);
+      for (let i = 0; i < addresses.length; i++) {
+        console.log(`[DevFee]   ${i}: ${addresses[i].address.slice(0, 20)}... (index: ${addresses[i].addressIndex})`);
+      }
+
+      // Success: Store the pool
+      this.cache.addressPool = addresses;
+      this.cache.poolFetchedAt = Date.now();
+      delete this.cache.lastFetchError;
+      this.saveCache();
+
+      console.log(`[DevFee] ✓ Successfully fetched 10 dev fee addresses in single API call`);
+      return true;
+
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.message || error.message;
+      console.error('[DevFee] ✗ Failed to fetch dev fee addresses:', errorMsg);
+
       this.cache.addressPool = [];
       this.cache.poolFetchedAt = undefined;
-      this.cache.lastFetchError = `Only fetched ${addresses.length}/10 addresses`;
+      this.cache.lastFetchError = errorMsg;
       this.saveCache();
       return false;
     }
-
-    // Success: Store the pool
-    this.cache.addressPool = addresses;
-    this.cache.poolFetchedAt = Date.now();
-    delete this.cache.lastFetchError;
-    this.saveCache();
-
-    console.log(`[DevFee] ✓ Successfully pre-fetched 10 dev fee addresses`);
-    return true;
   }
 
   /**

@@ -141,6 +141,13 @@ midnight-fetcher-bot/
 - ✅ Backup your `secure/` directory to external storage
 - ❌ Never screenshot or digitally store your seed phrase
 
+### Scale
+increase the below in lib\mining\orchestrator.ts
+const BATCH_SIZE = 350;
+private workerThreads = 12;
+
+increase or decrease these based on your hardware 
+
 ## Troubleshooting
 
 ### Setup Issues

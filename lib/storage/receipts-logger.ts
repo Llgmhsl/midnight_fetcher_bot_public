@@ -9,6 +9,7 @@ import * as path from 'path';
 export interface Receipt {
   ts: string;
   address: string;
+  addressIndex?: number; // Address index (0-199)
   challenge_id: string;
   nonce: string;
   hash: string;
@@ -22,6 +23,7 @@ export type ReceiptEntry = Receipt;
 export interface ErrorLog {
   ts: string;
   address: string;
+  addressIndex?: number; // Address index (0-199)
   challenge_id: string;
   nonce: string;
   hash: string;

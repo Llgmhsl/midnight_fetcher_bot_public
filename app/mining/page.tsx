@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, Suspense, useRef } from 'react';
+import React, { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
 import { Alert } from '@/components/ui/alert';
-import { Play, Square, Home, Loader2, Activity, Clock, Target, Hash, CheckCircle2, Wallet, Terminal, ChevronDown, ChevronUp, Pause, Play as PlayIcon, Maximize2, Minimize2, Cpu, ListChecks, TrendingUp, TrendingDown, Calendar, Copy, Check, XCircle, Users, Award, Zap } from 'lucide-react';
+import { Play, Square, Home, Loader2, Activity, Clock, Target, Hash, CheckCircle2, Wallet, Terminal, ChevronDown, ChevronUp, Pause, Play as PlayIcon, Maximize2, Minimize2, Cpu, ListChecks, TrendingUp, TrendingDown, Calendar, Copy, Check, XCircle, Users, Award, Zap, MapPin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface WorkerStats {
@@ -49,6 +49,7 @@ interface LogEntry {
 interface ReceiptEntry {
   ts: string;
   address: string;
+  addressIndex?: number;
   challenge_id: string;
   nonce: string;
   hash?: string;
@@ -57,6 +58,7 @@ interface ReceiptEntry {
 interface ErrorEntry {
   ts: string;
   address: string;
+  addressIndex?: number;
   challenge_id: string;
   nonce: string;
   hash?: string;
@@ -95,7 +97,7 @@ function MiningDashboardContent() {
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers' | 'addresses'>('dashboard');
   const [history, setHistory] = useState<HistoryData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'success' | 'error'>('all');
@@ -103,6 +105,11 @@ function MiningDashboardContent() {
 
   // Workers state
   const [workers, setWorkers] = useState<Map<number, WorkerStats>>(new Map());
+
+  // Addresses state
+  const [addressesData, setAddressesData] = useState<any | null>(null);
+  const [addressesLoading, setAddressesLoading] = useState(false);
+  const [addressFilter, setAddressFilter] = useState<'all' | 'solved' | 'unsolved' | 'registered' | 'unregistered'>('all');
 
   // Rewards state
   const [rewardsData, setRewardsData] = useState<any | null>(null);
@@ -349,6 +356,24 @@ function MiningDashboardContent() {
     }
   };
 
+  const fetchAddresses = async () => {
+    try {
+      setAddressesLoading(true);
+      const response = await fetch('/api/mining/addresses');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch addresses');
+      }
+
+      setAddressesData(data);
+    } catch (err: any) {
+      console.error('Failed to fetch addresses:', err);
+    } finally {
+      setAddressesLoading(false);
+    }
+  };
+
   const copyToClipboard = async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -382,10 +407,33 @@ function MiningDashboardContent() {
       ...history.errors.map(e => ({ type: 'error' as const, data: e }))
     ];
 
-    allEntries.sort((a, b) => new Date(b.data.ts).getTime() - new Date(a.data.ts).getTime());
+    // Filter by type if needed
+    const filtered = historyFilter === 'all' ? allEntries : allEntries.filter(e => e.type === historyFilter);
 
-    if (historyFilter === 'all') return allEntries;
-    return allEntries.filter(e => e.type === historyFilter);
+    // Group by address index and challenge, then sort by date within each group
+    const grouped = new Map<string, typeof filtered>();
+    filtered.forEach(entry => {
+      const key = `${entry.data.addressIndex ?? '?'}:${entry.data.challenge_id}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key)!.push(entry);
+    });
+
+    // Sort entries within each group by date (desc)
+    grouped.forEach(group => {
+      group.sort((a, b) => new Date(b.data.ts).getTime() - new Date(a.data.ts).getTime());
+    });
+
+    // Convert map to array and sort groups by latest timestamp (desc)
+    const sortedGroups = Array.from(grouped.values()).sort((a, b) => {
+      const aLatest = new Date(a[0].data.ts).getTime();
+      const bLatest = new Date(b[0].data.ts).getTime();
+      return bLatest - aLatest;
+    });
+
+    // Flatten groups back to single array
+    return sortedGroups.flat();
   };
 
   // Load history when switching to history tab and auto-refresh every 30 seconds
@@ -410,6 +458,13 @@ function MiningDashboardContent() {
   useEffect(() => {
     if (activeTab === 'rewards' && !rewardsData) {
       fetchRewards();
+    }
+  }, [activeTab]);
+
+  // Load addresses when switching to addresses tab
+  useEffect(() => {
+    if (activeTab === 'addresses' && !addressesData) {
+      fetchAddresses();
     }
   }, [activeTab]);
 
@@ -534,6 +589,21 @@ function MiningDashboardContent() {
             <Users className="w-4 h-4 inline mr-2" />
             Workers
             {activeTab === 'workers' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('addresses')}
+            className={cn(
+              'px-6 py-3 font-medium transition-colors relative',
+              activeTab === 'addresses'
+                ? 'text-blue-400'
+                : 'text-gray-400 hover:text-gray-300'
+            )}
+          >
+            <MapPin className="w-4 h-4 inline mr-2" />
+            Addresses
+            {activeTab === 'addresses' && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
             )}
           </button>
@@ -1045,16 +1115,26 @@ function MiningDashboardContent() {
                           <p className="text-sm">Start mining to see your solutions here</p>
                         </div>
                       ) : (
-                        getFilteredEntries().map((entry, index) => (
-                          <div
-                            key={index}
-                            className={cn(
-                              'p-4 rounded-lg border transition-colors',
-                              entry.type === 'success'
-                                ? 'bg-green-900/10 border-green-700/50'
-                                : 'bg-red-900/10 border-red-700/50'
-                            )}
-                          >
+                        getFilteredEntries().map((entry, index, array) => {
+                          // Check if this is a new address group (different address+challenge from previous entry)
+                          const prevEntry = index > 0 ? array[index - 1] : null;
+                          const isNewGroup = !prevEntry ||
+                            (prevEntry.data.addressIndex !== entry.data.addressIndex ||
+                             prevEntry.data.challenge_id !== entry.data.challenge_id);
+
+                          return (
+                            <React.Fragment key={index}>
+                              {isNewGroup && index > 0 && (
+                                <div className="border-t border-gray-700 my-4" />
+                              )}
+                              <div
+                                className={cn(
+                                  'p-4 rounded-lg border transition-colors',
+                                  entry.type === 'success'
+                                    ? 'bg-green-900/10 border-green-700/50'
+                                    : 'bg-red-900/10 border-red-700/50'
+                                )}
+                              >
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 space-y-2">
                                 <div className="flex items-center gap-2">
@@ -1073,7 +1153,7 @@ function MiningDashboardContent() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                                   <div>
-                                    <span className="text-gray-400">Address:</span>
+                                    <span className="text-gray-400">Address #{entry.data.addressIndex ?? '?'}:</span>
                                     <div className="flex items-center gap-1">
                                       <span className="text-white font-mono text-xs">
                                         {entry.data.address.slice(0, 20)}...
@@ -1135,8 +1215,10 @@ function MiningDashboardContent() {
                                 )}
                               </div>
                             </div>
-                          </div>
-                        ))
+                              </div>
+                            </React.Fragment>
+                          );
+                        })
                       )}
                     </div>
                   </CardContent>
@@ -1507,6 +1589,256 @@ function MiningDashboardContent() {
                             </div>
                           );
                         })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Addresses Tab */}
+        {activeTab === 'addresses' && (
+          <div className="space-y-6">
+            {addressesLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-12 h-12 animate-spin text-blue-500" />
+              </div>
+            ) : !addressesData ? (
+              <Card variant="bordered">
+                <CardContent className="text-center py-12">
+                  <p className="text-gray-400">No address data available yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* Summary Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <StatCard
+                    label="Total Addresses"
+                    value={addressesData.summary.totalAddresses}
+                    icon={<MapPin />}
+                    variant="primary"
+                  />
+                  <StatCard
+                    label="Registered"
+                    value={addressesData.summary.registeredAddresses}
+                    icon={<CheckCircle2 />}
+                    variant="success"
+                  />
+                  <StatCard
+                    label="Solved Current Challenge"
+                    value={addressesData.summary.solvedCurrentChallenge}
+                    icon={<Award />}
+                    variant="success"
+                  />
+                  <StatCard
+                    label="Not Yet Solved"
+                    value={addressesData.summary.totalAddresses - addressesData.summary.solvedCurrentChallenge}
+                    icon={<Target />}
+                    variant="default"
+                  />
+                </div>
+
+                {/* Filter Buttons */}
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setAddressFilter('all')}
+                    className={cn(
+                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      addressFilter === 'all'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    )}
+                  >
+                    All ({addressesData.addresses.length})
+                  </button>
+                  <button
+                    onClick={() => setAddressFilter('solved')}
+                    className={cn(
+                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      addressFilter === 'solved'
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    )}
+                  >
+                    Solved ({addressesData.summary.solvedCurrentChallenge})
+                  </button>
+                  <button
+                    onClick={() => setAddressFilter('unsolved')}
+                    className={cn(
+                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      addressFilter === 'unsolved'
+                        ? 'bg-yellow-500 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    )}
+                  >
+                    Unsolved ({addressesData.summary.totalAddresses - addressesData.summary.solvedCurrentChallenge})
+                  </button>
+                  <button
+                    onClick={() => setAddressFilter('registered')}
+                    className={cn(
+                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      addressFilter === 'registered'
+                        ? 'bg-purple-500 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    )}
+                  >
+                    Registered ({addressesData.summary.registeredAddresses})
+                  </button>
+                  <button
+                    onClick={() => setAddressFilter('unregistered')}
+                    className={cn(
+                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      addressFilter === 'unregistered'
+                        ? 'bg-gray-500 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    )}
+                  >
+                    Unregistered ({addressesData.summary.totalAddresses - addressesData.summary.registeredAddresses})
+                  </button>
+                  <div className="ml-auto">
+                    <Button
+                      onClick={fetchAddresses}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Current Challenge Info */}
+                {addressesData.currentChallenge && (
+                  <Alert variant="info">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-4 h-4" />
+                      <span className="font-semibold">Current Challenge:</span>
+                      <span className="font-mono text-sm">{addressesData.currentChallenge.slice(0, 24)}...</span>
+                      <button
+                        onClick={() => copyToClipboard(addressesData.currentChallenge, 'current-challenge')}
+                        className="text-gray-400 hover:text-white transition-colors"
+                      >
+                        {copiedId === 'current-challenge' ? (
+                          <Check className="w-3 h-3 text-green-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                  </Alert>
+                )}
+
+                {/* Address List */}
+                <Card variant="bordered">
+                  <CardHeader>
+                    <CardTitle className="text-xl">Address Status</CardTitle>
+                    <CardDescription>
+                      {addressFilter === 'all' && `Showing all ${addressesData.addresses.filter((addr: any) => {
+                        if (addressFilter === 'all') return true;
+                        if (addressFilter === 'solved') return addr.solvedCurrentChallenge;
+                        if (addressFilter === 'unsolved') return !addr.solvedCurrentChallenge;
+                        if (addressFilter === 'registered') return addr.registered;
+                        if (addressFilter === 'unregistered') return !addr.registered;
+                        return true;
+                      }).length} addresses`}
+                      {addressFilter === 'solved' && `Addresses that solved the current challenge`}
+                      {addressFilter === 'unsolved' && `Addresses that haven't solved the current challenge yet`}
+                      {addressFilter === 'registered' && `Registered addresses`}
+                      {addressFilter === 'unregistered' && `Unregistered addresses`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                      {addressesData.addresses
+                        .filter((addr: any) => {
+                          if (addressFilter === 'all') return true;
+                          if (addressFilter === 'solved') return addr.solvedCurrentChallenge;
+                          if (addressFilter === 'unsolved') return !addr.solvedCurrentChallenge;
+                          if (addressFilter === 'registered') return addr.registered;
+                          if (addressFilter === 'unregistered') return !addr.registered;
+                          return true;
+                        })
+                        .map((address: any, index: number) => (
+                          <div
+                            key={address.index}
+                            className={cn(
+                              'p-3 rounded-lg border transition-colors',
+                              address.solvedCurrentChallenge
+                                ? 'bg-green-900/10 border-green-700/50'
+                                : 'bg-gray-900/10 border-gray-700/50'
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="flex items-center gap-3 flex-1">
+                                {/* Index Badge */}
+                                <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-gray-800 flex items-center justify-center">
+                                  <span className="text-lg font-bold text-gray-300">#{address.index}</span>
+                                </div>
+
+                                {/* Address Info */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-white font-mono text-sm truncate">
+                                      {address.bech32}
+                                    </span>
+                                    <button
+                                      onClick={() => copyToClipboard(address.bech32, `address-${address.index}`)}
+                                      className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                                    >
+                                      {copiedId === `address-${address.index}` ? (
+                                        <Check className="w-3 h-3 text-green-400" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className="text-gray-500">
+                                      Total Solutions: <span className="text-white font-semibold">{address.totalSolutions}</span>
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Status Badges */}
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                {address.registered ? (
+                                  <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400">
+                                    Registered
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 rounded text-xs font-medium bg-gray-500/20 text-gray-400">
+                                    Not Registered
+                                  </span>
+                                )}
+                                {address.solvedCurrentChallenge ? (
+                                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Solved
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      {addressesData.addresses.filter((addr: any) => {
+                        if (addressFilter === 'all') return true;
+                        if (addressFilter === 'solved') return addr.solvedCurrentChallenge;
+                        if (addressFilter === 'unsolved') return !addr.solvedCurrentChallenge;
+                        if (addressFilter === 'registered') return addr.registered;
+                        if (addressFilter === 'unregistered') return !addr.registered;
+                        return true;
+                      }).length === 0 && (
+                        <div className="text-center py-12 text-gray-500">
+                          <MapPin className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                          <p className="text-lg">No addresses match this filter</p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
