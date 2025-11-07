@@ -79,11 +79,12 @@ export function dayFromChallengeId(challengeId: string): number {
 
 /**
  * Get date string from challenge_id
- * Assumes TGE start date of 2025-01-16
+ * Day 1 started on 2025-10-30 (updated from incorrect 2025-01-16)
  */
 function dateFromChallengeId(challengeId: string): string {
   const day = dayFromChallengeId(challengeId);
-  const tgeStart = new Date('2025-01-16T00:00:00Z');
+  // CORRECTED: Day 1 = 2025-10-30, Day 8 = 2025-11-06
+  const tgeStart = new Date('2025-10-30T00:00:00Z');
   const date = new Date(tgeStart.getTime() + (day - 1) * 24 * 60 * 60 * 1000);
   return date.toISOString().split('T')[0];
 }
@@ -158,8 +159,8 @@ export function computeStats(receipts: ReceiptEntry[], rates: number[]): GlobalS
       totalStar += star;
     }
 
-    // Sort days
-    days.sort((a, b) => a.day - b.day);
+    // Sort days descending (most recent first)
+    days.sort((a, b) => b.day - a.day);
 
     // Get first and last solution timestamps
     const timestamps = addressTimestamps.get(address)!.sort();
@@ -213,8 +214,8 @@ export function computeStats(receipts: ReceiptEntry[], rates: number[]): GlobalS
     });
   }
 
-  // Sort days
-  days.sort((a, b) => a.day - b.day);
+  // Sort days descending (most recent first)
+  days.sort((a, b) => b.day - a.day);
 
   // Grand total
   const grandTotal = {
@@ -229,8 +230,9 @@ export function computeStats(receipts: ReceiptEntry[], rates: number[]): GlobalS
     days,
     byAddress,
     grandTotal,
-    startDate: days.length > 0 ? days[0].date : undefined,
-    endDate: days.length > 0 ? days[days.length - 1].date : undefined,
+    // With descending sort, first is most recent, last is oldest
+    startDate: days.length > 0 ? days[days.length - 1].date : undefined,
+    endDate: days.length > 0 ? days[0].date : undefined,
   };
 }
 

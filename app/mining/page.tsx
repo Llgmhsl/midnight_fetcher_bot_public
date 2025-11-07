@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { StatCard } from '@/components/ui/stat-card';
 import { Alert } from '@/components/ui/alert';
 import { Modal } from '@/components/ui/modal';
-import { Play, Square, Home, Loader2, Activity, Clock, Target, Hash, CheckCircle2, Wallet, Terminal, ChevronDown, ChevronUp, Pause, Play as PlayIcon, Maximize2, Minimize2, Cpu, ListChecks, TrendingUp, TrendingDown, Calendar, Copy, Check, XCircle, Users, Award, Zap, MapPin, AlertCircle } from 'lucide-react';
+import { Play, Square, Home, Loader2, Activity, Clock, Target, Hash, CheckCircle2, Wallet, Terminal, ChevronDown, ChevronUp, Pause, Play as PlayIcon, Maximize2, Minimize2, Cpu, ListChecks, TrendingUp, TrendingDown, Calendar, Copy, Check, XCircle, Users, Award, Zap, MapPin, AlertCircle, Gauge, MemoryStick as Memory, RefreshCw, Settings, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface WorkerStats {
@@ -117,7 +117,7 @@ function MiningDashboardContent() {
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers' | 'addresses'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers' | 'addresses' | 'logs' | 'scale'>('dashboard');
   const [history, setHistory] = useState<HistoryData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'success' | 'error'>('all');
@@ -127,6 +127,12 @@ function MiningDashboardContent() {
 
   // Workers state
   const [workers, setWorkers] = useState<Map<number, WorkerStats>>(new Map());
+
+  // Scale tab state
+  const [scaleSpecs, setScaleSpecs] = useState<any>(null);
+  const [scaleRecommendations, setScaleRecommendations] = useState<any>(null);
+  const [scaleLoading, setScaleLoading] = useState(false);
+  const [scaleError, setScaleError] = useState<string | null>(null);
 
   // Addresses state
   const [addressesData, setAddressesData] = useState<any | null>(null);
@@ -396,6 +402,27 @@ function MiningDashboardContent() {
     }
   };
 
+  const fetchScaleData = async () => {
+    setScaleLoading(true);
+    setScaleError(null);
+
+    try {
+      const response = await fetch('/api/system/specs');
+      const data = await response.json();
+
+      if (data.success) {
+        setScaleSpecs(data.specs);
+        setScaleRecommendations(data.recommendations);
+      } else {
+        setScaleError(data.error || 'Failed to load system specifications');
+      }
+    } catch (err: any) {
+      setScaleError(err.message || 'Failed to connect to API');
+    } finally {
+      setScaleLoading(false);
+    }
+  };
+
   const copyToClipboard = async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -453,6 +480,13 @@ function MiningDashboardContent() {
     }
   }, [activeTab]);
 
+  // Load scale data when switching to scale tab
+  useEffect(() => {
+    if (activeTab === 'scale' && !scaleSpecs) {
+      fetchScaleData();
+    }
+  }, [activeTab]);
+
   // Update refresh time display every second
   useEffect(() => {
     const interval = setInterval(() => {
@@ -501,18 +535,59 @@ function MiningDashboardContent() {
               )}
             </div>
           </div>
-          <Button
-            onClick={() => {
-              // Clear password from sessionStorage when leaving
-              sessionStorage.removeItem('walletPassword');
-              router.push('/');
-            }}
-            variant="outline"
-            size="md"
-          >
-            <Home className="w-4 h-4" />
-            Back to Home
-          </Button>
+          <div className="flex gap-3">
+            {!stats.active ? (
+              <Button
+                onClick={handleStartMining}
+                disabled={loading}
+                variant="success"
+                size="md"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Initializing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Start Mining
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleStopMining}
+                disabled={loading}
+                variant="danger"
+                size="md"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Stopping...
+                  </>
+                ) : (
+                  <>
+                    <Square className="w-4 h-4" />
+                    Stop Mining
+                  </>
+                )}
+              </Button>
+            )}
+            <Button
+              onClick={() => {
+                // Clear password from sessionStorage when leaving
+                sessionStorage.removeItem('walletPassword');
+                router.push('/');
+              }}
+              variant="outline"
+              size="md"
+            >
+              <Home className="w-4 h-4" />
+              Back to Home
+            </Button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -592,6 +667,36 @@ function MiningDashboardContent() {
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
             )}
           </button>
+          <button
+            onClick={() => setActiveTab('scale')}
+            className={cn(
+              'px-6 py-3 font-medium transition-colors relative',
+              activeTab === 'scale'
+                ? 'text-blue-400'
+                : 'text-gray-400 hover:text-gray-300'
+            )}
+          >
+            <Gauge className="w-4 h-4 inline mr-2" />
+            Scale
+            {activeTab === 'scale' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={cn(
+              'px-6 py-3 font-medium transition-colors relative',
+              activeTab === 'logs'
+                ? 'text-blue-400'
+                : 'text-gray-400 hover:text-gray-300'
+            )}
+          >
+            <Terminal className="w-4 h-4 inline mr-2" />
+            Logs
+            {activeTab === 'logs' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
+            )}
+          </button>
         </div>
 
         {/* Error Display */}
@@ -600,155 +705,168 @@ function MiningDashboardContent() {
         {/* Dashboard Tab */}
         {activeTab === 'dashboard' && (
         <>
-        {/* Mining Control Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Mining Control Button */}
-          <Card variant="elevated">
-            <CardContent className="pt-6 pb-6">
-              <div className="flex flex-col items-center gap-3">
-                {!stats.active ? (
-                  <Button
-                    onClick={handleStartMining}
-                    disabled={loading}
-                    variant="success"
-                    size="lg"
-                    className="w-full"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Initializing...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5" />
-                        Start Mining
-                      </>
-                    )}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleStopMining}
-                    disabled={loading}
-                    variant="danger"
-                    size="lg"
-                    className="w-full"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Stopping...
-                      </>
-                    ) : (
-                      <>
-                        <Square className="w-5 h-5" />
-                        Stop Mining
-                      </>
-                    )}
-                  </Button>
-                )}
-                <p className="text-xs text-gray-500 text-center">
-                  {stats.active
-                    ? 'Stop all mining operations'
-                    : `${stats.totalAddresses} addresses ready`}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Mining Status Card */}
-          <StatCard
-            label="Mining Status"
-            value={stats.active ? "Active" : "Stopped"}
-            icon={<Activity />}
-            variant={stats.active ? "success" : "default"}
-          />
-        </div>
-
-        {/* Stats Grid */}
+        {/* Redesigned Stats - Compact Hero Section */}
         <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <StatCard
-                label="Challenge ID"
-                value={stats.challengeId ? stats.challengeId.slice(0, 16) + '...' : 'Waiting...'}
-                icon={<Target />}
-                variant="primary"
-              />
+            {/* Primary Stats - Hero Cards */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Current Challenge Card with Mining Status */}
+              <Card variant="bordered" className="bg-gradient-to-br from-blue-900/20 to-blue-800/10 border-blue-700/50">
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-blue-500/20 rounded-lg">
+                        <Target className="w-6 h-6 text-blue-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-sm text-gray-400 font-medium">Current Challenge</p>
+                          {stats.active && (
+                            <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                              Mining
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-2xl font-bold text-white mt-1">
+                          {stats.challengeId ? stats.challengeId.slice(2, 10) : 'Waiting...'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Progress</span>
+                      <span className="font-semibold text-white">
+                        {stats.addressesProcessedCurrentChallenge} / {stats.totalAddresses}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-700/50 rounded-full h-2">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${stats.active ? 'bg-blue-500' : 'bg-gray-500'}`}
+                        style={{ width: `${(stats.addressesProcessedCurrentChallenge / stats.totalAddresses) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <StatCard
-                label="Solutions Found"
-                value={stats.solutionsFound}
-                icon={<CheckCircle2 />}
-                variant="success"
-              />
+              {/* Solutions Found Card */}
+              <Card variant="bordered" className="bg-gradient-to-br from-green-900/20 to-green-800/10 border-green-700/50">
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-green-500/20 rounded-lg">
+                        <CheckCircle2 className="w-6 h-6 text-green-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-400 font-medium">Solutions Found</p>
+                        <p className="text-4xl font-bold text-white mt-1">{stats.solutionsFound}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-400">This Hour</p>
+                      <p className="text-lg font-semibold text-white">{stats.solutionsThisHour}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Today</p>
+                      <p className="text-lg font-semibold text-white">{stats.solutionsToday}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <StatCard
-                label="Uptime"
-                value={formatUptime(stats.uptime)}
-                icon={<Clock />}
-                variant="default"
-              />
+              {/* Hash Rate & Performance Card */}
+              <Card variant="bordered" className="bg-gradient-to-br from-purple-900/20 to-purple-800/10 border-purple-700/50">
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-purple-500/20 rounded-lg">
+                        <Hash className="w-6 h-6 text-purple-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-400 font-medium">Hash Rate</p>
+                        <p className="text-2xl font-bold text-white mt-1">
+                          {stats.hashRate > 0 ? `${stats.hashRate.toFixed(0)}` : '---'}
+                          <span className="text-lg text-gray-400 ml-1">H/s</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-400">Workers</p>
+                      <p className="text-lg font-semibold text-white">{stats.workerThreads}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">CPU</p>
+                      <p className="text-lg font-semibold text-white">
+                        {stats.cpuUsage != null ? `${stats.cpuUsage.toFixed(0)}%` : 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-              <StatCard
-                label="Hash Rate"
-                value={stats.hashRate > 0 ? `${stats.hashRate.toFixed(2)} H/s` : 'Calculating...'}
-                icon={<Hash />}
-                variant={stats.hashRate > 0 ? 'primary' : 'default'}
-              />
+            {/* Secondary Stats Row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card variant="bordered">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-5 h-5 text-gray-400" />
+                    <div>
+                      <p className="text-xs text-gray-500">Uptime</p>
+                      <p className="text-base font-semibold text-white">{formatUptime(stats.uptime)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <StatCard
-                label="Registered Addresses"
-                value={`${stats.registeredAddresses} / ${stats.totalAddresses}`}
-                icon={<Wallet />}
-                variant="default"
-              />
+              <Card variant="bordered">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-5 h-5 text-gray-400" />
+                    <div>
+                      <p className="text-xs text-gray-500">Addresses</p>
+                      <p className="text-base font-semibold text-white">
+                        {stats.registeredAddresses} / {stats.totalAddresses}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <StatCard
-                label="CPU Usage"
-                value={stats.cpuUsage != null ? `${stats.cpuUsage.toFixed(1)}%` : 'N/A'}
-                icon={<Cpu />}
-                variant={stats.cpuUsage != null && stats.cpuUsage > 80 ? 'warning' : 'default'}
-              />
+              <Card variant="bordered">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <TrendingUp className={`w-5 h-5 ${stats.solutionsThisHour >= stats.solutionsPreviousHour ? 'text-green-400' : 'text-gray-400'}`} />
+                    <div>
+                      <p className="text-xs text-gray-500">Hourly Trend</p>
+                      <p className="text-base font-semibold text-white">
+                        {stats.solutionsThisHour >= stats.solutionsPreviousHour ? '+' : ''}
+                        {stats.solutionsThisHour - stats.solutionsPreviousHour}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <StatCard
-                label="Worker Threads"
-                value={stats.workerThreads.toString()}
-                icon={<Activity />}
-                variant="primary"
-              />
-
-              <StatCard
-                label="Challenge Progress"
-                value={`${stats.addressesProcessedCurrentChallenge} / ${stats.totalAddresses}`}
-                icon={<ListChecks />}
-                variant="default"
-              />
-
-              <StatCard
-                label="Hourly Solutions"
-                value={stats.solutionsThisHour.toString()}
-                icon={<Clock />}
-                variant={stats.solutionsThisHour > stats.solutionsPreviousHour ? 'success' : 'default'}
-                trend={stats.solutionsThisHour > stats.solutionsPreviousHour ? 'up' : stats.solutionsThisHour < stats.solutionsPreviousHour ? 'down' : 'neutral'}
-                trendValue={
-                  stats.solutionsPreviousHour > 0
-                    ? `${stats.solutionsThisHour > stats.solutionsPreviousHour ? '+' : ''}${stats.solutionsThisHour - stats.solutionsPreviousHour} vs last hour`
-                    : 'Previous hour: 0'
-                }
-              />
-
-              <StatCard
-                label="Daily Solutions"
-                value={stats.solutionsToday.toString()}
-                icon={<Calendar />}
-                variant={stats.solutionsToday > stats.solutionsYesterday ? 'success' : 'default'}
-                trend={stats.solutionsToday > stats.solutionsYesterday ? 'up' : stats.solutionsToday < stats.solutionsYesterday ? 'down' : 'neutral'}
-                trendValue={
-                  stats.solutionsYesterday > 0
-                    ? `${stats.solutionsToday > stats.solutionsYesterday ? '+' : ''}${stats.solutionsToday - stats.solutionsYesterday} vs yesterday`
-                    : 'Yesterday: 0'
-                }
-              />
+              <Card variant="bordered">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <Calendar className={`w-5 h-5 ${stats.solutionsToday >= stats.solutionsYesterday ? 'text-green-400' : 'text-gray-400'}`} />
+                    <div>
+                      <p className="text-xs text-gray-500">Daily Trend</p>
+                      <p className="text-base font-semibold text-white">
+                        {stats.solutionsToday >= stats.solutionsYesterday ? '+' : ''}
+                        {stats.solutionsToday - stats.solutionsYesterday}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Registration Progress Alert - Only show when mining is active */}
@@ -796,209 +914,6 @@ function MiningDashboardContent() {
               </Alert>
             )}
             </>
-
-            {/* Live Log Window - Only show when mining is active */}
-            {stats.active && (
-            <Card variant="bordered">
-              <CardHeader>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl flex items-center gap-2">
-                      <Terminal className="w-5 h-5 text-blue-400" />
-                      Mining Log
-                    </CardTitle>
-                    <div className="flex items-center gap-2">
-                      {/* Follow/Unfollow Toggle */}
-                      <Button
-                        variant={autoFollow ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => setAutoFollow(!autoFollow)}
-                        className="h-8 gap-1.5"
-                        title={autoFollow ? "Auto-scroll enabled" : "Auto-scroll disabled"}
-                      >
-                        {autoFollow ? <PlayIcon className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-                        <span className="text-xs">{autoFollow ? 'Following' : 'Paused'}</span>
-                      </Button>
-
-                      {/* Size Toggle */}
-                      <div className="flex gap-1 bg-gray-800 rounded p-1">
-                        <button
-                          onClick={() => setLogHeight('small')}
-                          className={cn(
-                            'px-2 py-1 rounded text-xs transition-colors',
-                            logHeight === 'small' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
-                          )}
-                          title="Small (200px)"
-                        >
-                          S
-                        </button>
-                        <button
-                          onClick={() => setLogHeight('medium')}
-                          className={cn(
-                            'px-2 py-1 rounded text-xs transition-colors',
-                            logHeight === 'medium' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
-                          )}
-                          title="Medium (400px)"
-                        >
-                          M
-                        </button>
-                        <button
-                          onClick={() => setLogHeight('large')}
-                          className={cn(
-                            'px-2 py-1 rounded text-xs transition-colors',
-                            logHeight === 'large' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
-                          )}
-                          title="Large (600px)"
-                        >
-                          L
-                        </button>
-                      </div>
-
-                      {/* Collapse Toggle */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowLogs(!showLogs)}
-                        className="h-8 w-8 p-0"
-                      >
-                        {showLogs ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                  {showLogs && (
-                    <div className="flex gap-2 flex-wrap">
-                      <button
-                        onClick={() => setLogFilter('all')}
-                        className={cn(
-                          'px-3 py-1 rounded text-xs font-medium transition-colors',
-                          logFilter === 'all'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        )}
-                      >
-                        All ({logs.length})
-                      </button>
-                      <button
-                        onClick={() => setLogFilter('error')}
-                        className={cn(
-                          'px-3 py-1 rounded text-xs font-medium transition-colors',
-                          logFilter === 'error'
-                            ? 'bg-red-500 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        )}
-                      >
-                        Errors ({logs.filter(l => l.type === 'error').length})
-                      </button>
-                      <button
-                        onClick={() => setLogFilter('warning')}
-                        className={cn(
-                          'px-3 py-1 rounded text-xs font-medium transition-colors',
-                          logFilter === 'warning'
-                            ? 'bg-yellow-500 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        )}
-                      >
-                        Warnings ({logs.filter(l => l.type === 'warning').length})
-                      </button>
-                      <button
-                        onClick={() => setLogFilter('success')}
-                        className={cn(
-                          'px-3 py-1 rounded text-xs font-medium transition-colors',
-                          logFilter === 'success'
-                            ? 'bg-green-500 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        )}
-                      >
-                        Success ({logs.filter(l => l.type === 'success').length})
-                      </button>
-                      <button
-                        onClick={() => setLogFilter('info')}
-                        className={cn(
-                          'px-3 py-1 rounded text-xs font-medium transition-colors',
-                          logFilter === 'info'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        )}
-                      >
-                        Info ({logs.filter(l => l.type === 'info').length})
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              {showLogs && (
-                <CardContent>
-                  <div
-                    ref={logContainerRef}
-                    className={cn(
-                      "bg-gray-950 rounded-lg p-4 overflow-y-auto font-mono text-sm space-y-1 scroll-smooth transition-all",
-                      logHeight === 'small' && 'h-[200px]',
-                      logHeight === 'medium' && 'h-[400px]',
-                      logHeight === 'large' && 'h-[600px]'
-                    )}
-                  >
-                    {logs.length === 0 ? (
-                      <p className="text-gray-500 text-center py-8">No logs yet. Start mining to see activity.</p>
-                    ) : (
-                      logs
-                        .filter(log => logFilter === 'all' || log.type === logFilter)
-                        .map((log, index) => (
-                          <div key={index} className="flex items-start gap-2 animate-in fade-in duration-200">
-                            <span className="text-gray-600 shrink-0">
-                              {new Date(log.timestamp).toLocaleTimeString()}
-                            </span>
-                            <span className={cn(
-                              log.type === 'error' && 'text-red-400',
-                              log.type === 'success' && 'text-green-400',
-                              log.type === 'warning' && 'text-yellow-400',
-                              log.type === 'info' && 'text-blue-400'
-                            )}>
-                              {log.message}
-                            </span>
-                          </div>
-                        ))
-                    )}
-                  </div>
-                </CardContent>
-              )}
-            </Card>
-            )}
-
-            {/* Additional Info Card - Only show when mining is active */}
-            {stats.active && (
-            <Card variant="bordered">
-              <CardHeader>
-                <CardTitle className="text-xl flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-green-400" />
-                  Mining Performance
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-400 mb-1">Average Performance</p>
-                    <p className="text-white font-semibold">
-                      {stats.hashRate > 0 ? 'Normal' : 'Warming up...'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 mb-1">Registration Progress</p>
-                    <p className="text-white font-semibold">
-                      {Math.round((stats.registeredAddresses / stats.totalAddresses) * 100)}%
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 mb-1">Solutions Rate</p>
-                    <p className="text-white font-semibold">
-                      {stats.uptime > 0
-                        ? `${(stats.solutionsFound / (stats.uptime / 3600000)).toFixed(2)}/hr`
-                        : 'Calculating...'}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            )}
           </>
         )}
 
@@ -1012,37 +927,74 @@ function MiningDashboardContent() {
               </div>
             ) : history ? (
               <>
-                {/* Summary Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <StatCard
-                    label="Total Solutions"
-                    value={history.summary.totalSolutions}
-                    icon={<CheckCircle2 />}
-                    variant="success"
-                  />
-                  <StatCard
-                    label="Failed Submissions"
-                    value={history.summary.totalErrors}
-                    icon={<XCircle />}
-                    variant={history.summary.totalErrors > 0 ? 'danger' : 'default'}
-                  />
-                  <StatCard
-                    label="Success Rate"
-                    value={history.summary.successRate}
-                    icon={<TrendingUp />}
-                    variant="primary"
-                  />
+                {/* Summary Stats - Hero Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Total Solutions Card */}
+                  <Card variant="bordered" className="bg-gradient-to-br from-green-900/20 to-green-800/10 border-green-700/50">
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="p-3 bg-green-500/20 rounded-lg">
+                          <CheckCircle2 className="w-6 h-6 text-green-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-400 font-medium">Total Solutions</p>
+                          <p className="text-4xl font-bold text-white mt-1">{history.summary.totalSolutions}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Failed Submissions Card */}
+                  <Card variant="bordered" className={cn(
+                    "bg-gradient-to-br border-red-700/50",
+                    history.summary.totalErrors > 0
+                      ? "from-red-900/20 to-red-800/10"
+                      : "from-gray-900/20 to-gray-800/10 border-gray-700/50"
+                  )}>
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className={cn(
+                          "p-3 rounded-lg",
+                          history.summary.totalErrors > 0 ? "bg-red-500/20" : "bg-gray-500/20"
+                        )}>
+                          <XCircle className={cn(
+                            "w-6 h-6",
+                            history.summary.totalErrors > 0 ? "text-red-400" : "text-gray-400"
+                          )} />
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-400 font-medium">Failed Submissions</p>
+                          <p className="text-4xl font-bold text-white mt-1">{history.summary.totalErrors}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Success Rate Card */}
+                  <Card variant="bordered" className="bg-gradient-to-br from-blue-900/20 to-blue-800/10 border-blue-700/50">
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="p-3 bg-blue-500/20 rounded-lg">
+                          <TrendingUp className="w-6 h-6 text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-400 font-medium">Success Rate</p>
+                          <p className="text-4xl font-bold text-white mt-1">{history.summary.successRate}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
 
-                {/* Filter Buttons */}
-                <div className="flex gap-2">
+                {/* Filter Buttons with improved styling */}
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setHistoryFilter('all')}
                     className={cn(
-                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      'px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                       historyFilter === 'all'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'
                     )}
                   >
                     All ({history.addressHistory.length})
@@ -1050,10 +1002,10 @@ function MiningDashboardContent() {
                   <button
                     onClick={() => setHistoryFilter('success')}
                     className={cn(
-                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      'px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                       historyFilter === 'success'
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        ? 'bg-green-600 text-white shadow-lg shadow-green-500/30'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'
                     )}
                   >
                     Success ({history.addressHistory.filter(h => h.status === 'success').length})
@@ -1061,32 +1013,38 @@ function MiningDashboardContent() {
                   <button
                     onClick={() => setHistoryFilter('error')}
                     className={cn(
-                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      'px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                       historyFilter === 'error'
-                        ? 'bg-red-500 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        ? 'bg-red-600 text-white shadow-lg shadow-red-500/30'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'
                     )}
                   >
                     Failed ({history.addressHistory.filter(h => h.status === 'failed').length})
                   </button>
-                  <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-gray-500">
-                      Last: {formatTimeSince(historyLastRefresh)}
+                  <div className="ml-auto flex items-center gap-3">
+                    <span className="text-sm text-gray-400">
+                      <Clock className="w-4 h-4 inline mr-1" />
+                      {formatTimeSince(historyLastRefresh)}
                     </span>
                     <Button
                       onClick={fetchHistory}
                       variant="outline"
                       size="sm"
+                      className="gap-2"
                     >
+                      <Activity className="w-4 h-4" />
                       Refresh
                     </Button>
                   </div>
                 </div>
 
                 {/* Address History Table */}
-                <Card variant="bordered">
+                <Card variant="bordered" className="bg-gradient-to-br from-gray-900/40 to-gray-800/20">
                   <CardHeader>
-                    <CardTitle className="text-xl">Solution History by Address</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <ListChecks className="w-5 h-5 text-blue-400" />
+                      <CardTitle className="text-xl">Solution History by Address</CardTitle>
+                    </div>
                     <CardDescription>
                       Each row represents one address's attempt at a challenge
                     </CardDescription>
@@ -1102,6 +1060,9 @@ function MiningDashboardContent() {
                       ) : (
                         history.addressHistory
                           .filter(h => {
+                            // Filter out dev fee addresses (index -1)
+                            if (h.addressIndex === -1) return false;
+
                             if (historyFilter === 'all') return true;
                             if (historyFilter === 'success') return h.status === 'success';
                             if (historyFilter === 'error') return h.status === 'failed';
@@ -1111,10 +1072,10 @@ function MiningDashboardContent() {
                             <div
                               key={`${addressHistory.addressIndex}-${addressHistory.challengeId}`}
                               className={cn(
-                                'p-4 rounded-lg border transition-colors cursor-pointer hover:border-gray-600',
+                                'p-5 rounded-lg border-2 transition-all duration-200 cursor-pointer',
                                 addressHistory.status === 'success'
-                                  ? 'bg-green-900/10 border-green-700/50'
-                                  : 'bg-red-900/10 border-red-700/50'
+                                  ? 'bg-gradient-to-r from-green-900/20 to-green-800/10 border-green-700/50 hover:border-green-600/70 hover:shadow-lg hover:shadow-green-500/10'
+                                  : 'bg-gradient-to-r from-red-900/20 to-red-800/10 border-red-700/50 hover:border-red-600/70 hover:shadow-lg hover:shadow-red-500/10'
                               )}
                               onClick={() => {
                                 if (addressHistory.failureCount > 0) {
@@ -1175,19 +1136,37 @@ function MiningDashboardContent() {
                                       <div className="text-lg font-bold text-green-400">{addressHistory.successCount}</div>
                                     </div>
                                   )}
+
+                                  <div className="text-center">
+                                    <div className="text-xs text-gray-400">Last Attempt</div>
+                                    <div className="text-sm font-medium text-white">
+                                      {new Date(addressHistory.lastAttempt).toLocaleDateString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric'
+                                      })}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {new Date(addressHistory.lastAttempt).toLocaleTimeString('en-US', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        second: '2-digit'
+                                      })}
+                                    </div>
+                                  </div>
                                 </div>
 
                                 {/* Right: Status Badge */}
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-3">
                                   {addressHistory.status === 'success' ? (
-                                    <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500/20 border border-green-500/50">
+                                    <div className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-green-500/20 border-2 border-green-500/50 shadow-lg shadow-green-500/20">
                                       <CheckCircle2 className="w-5 h-5 text-green-400" />
-                                      <span className="text-green-400 font-semibold">Success</span>
+                                      <span className="text-green-400 font-bold">Success</span>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/50">
+                                    <div className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-500/20 border-2 border-red-500/50 shadow-lg shadow-red-500/20">
                                       <XCircle className="w-5 h-5 text-red-400" />
-                                      <span className="text-red-400 font-semibold">Failed</span>
+                                      <span className="text-red-400 font-bold">Failed</span>
                                     </div>
                                   )}
 
@@ -1198,7 +1177,7 @@ function MiningDashboardContent() {
                                         setSelectedAddressHistory(addressHistory);
                                         setFailureModalOpen(true);
                                       }}
-                                      className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+                                      className="p-3 rounded-lg bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30 transition-all duration-200 hover:shadow-lg hover:shadow-yellow-500/20"
                                       title="View failure details"
                                     >
                                       <AlertCircle className="w-5 h-5 text-yellow-400" />
@@ -1285,44 +1264,51 @@ function MiningDashboardContent() {
             ) : !rewardsData ? (
               <Card variant="bordered">
                 <CardContent className="text-center py-12">
-                  <p className="text-gray-400">No rewards data available yet</p>
+                  <Award className="w-16 h-16 mx-auto mb-4 opacity-50 text-gray-500" />
+                  <p className="text-gray-400 text-lg">No rewards data available yet</p>
+                  <p className="text-gray-500 text-sm mt-2">Start mining to earn rewards</p>
                 </CardContent>
               </Card>
             ) : (
               <>
-                {/* View Toggle */}
-                <div className="flex gap-2">
+                {/* View Toggle with improved styling */}
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setRewardsView('hourly')}
                     className={cn(
-                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      'px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                       rewardsView === 'hourly'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'
                     )}
                   >
+                    <Clock className="w-4 h-4 inline mr-2" />
                     Hourly
                   </button>
                   <button
                     onClick={() => setRewardsView('daily')}
                     className={cn(
-                      'px-4 py-2 rounded text-sm font-medium transition-colors',
+                      'px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200',
                       rewardsView === 'daily'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700'
                     )}
                   >
+                    <Calendar className="w-4 h-4 inline mr-2" />
                     Daily
                   </button>
-                  <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-gray-500">
-                      Last: {formatTimeSince(rewardsLastRefresh)}
+                  <div className="ml-auto flex items-center gap-3">
+                    <span className="text-sm text-gray-400">
+                      <Clock className="w-4 h-4 inline mr-1" />
+                      {formatTimeSince(rewardsLastRefresh)}
                     </span>
                     <Button
                       onClick={fetchRewards}
                       variant="outline"
                       size="sm"
+                      className="gap-2"
                     >
+                      <Activity className="w-4 h-4" />
                       Refresh
                     </Button>
                   </div>
@@ -1330,9 +1316,12 @@ function MiningDashboardContent() {
 
                 {/* Hourly View */}
                 {rewardsView === 'hourly' && rewardsData.last8Hours && (
-                  <Card variant="bordered">
+                  <Card variant="bordered" className="bg-gradient-to-br from-gray-900/40 to-gray-800/20">
                     <CardHeader>
-                      <CardTitle className="text-xl">Last 8 Hours Rewards</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-blue-400" />
+                        <CardTitle className="text-xl">Last 8 Hours Rewards</CardTitle>
+                      </div>
                       <CardDescription>
                         Hourly breakdown of mining rewards
                       </CardDescription>
@@ -1340,20 +1329,21 @@ function MiningDashboardContent() {
                     <CardContent>
                       <div className="overflow-x-auto">
                         <table className="w-full text-left">
-                          <thead className="border-b border-gray-700">
-                            <tr className="text-gray-400 text-sm">
-                              <th className="py-3 px-4">Hour</th>
-                              <th className="py-3 px-4">Receipts</th>
-                              <th className="py-3 px-4">Addresses</th>
-                              <th className="py-3 px-4">STAR</th>
-                              <th className="py-3 px-4">NIGHT</th>
+                          <thead className="border-b-2 border-gray-700">
+                            <tr className="text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                              <th className="py-4 px-4">Time Period</th>
+                              <th className="py-4 px-4">Receipts</th>
+                              <th className="py-4 px-4">Addresses</th>
+                              <th className="py-4 px-4">STAR</th>
+                              <th className="py-4 px-4">NIGHT</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-700">
+                          <tbody className="divide-y divide-gray-800">
                             {rewardsData.last8Hours.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="py-8 text-center text-gray-500">
-                                  No hourly data available yet
+                                <td colSpan={5} className="py-12 text-center text-gray-500">
+                                  <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                                  <p>No hourly data available yet</p>
                                 </td>
                               </tr>
                             ) : (
@@ -1362,21 +1352,25 @@ function MiningDashboardContent() {
                                 const hourEnd = new Date(hourStart.getTime() + 3600000);
 
                                 return (
-                                  <tr key={index} className="text-white hover:bg-gray-800/30">
-                                    <td className="py-3 px-4 text-gray-300">
-                                      <div className="text-sm">
+                                  <tr key={index} className="text-white hover:bg-blue-500/5 transition-colors">
+                                    <td className="py-4 px-4">
+                                      <div className="text-sm font-medium">
                                         {hourStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         {' - '}
                                         {hourEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       </div>
-                                      <div className="text-xs text-gray-500">
+                                      <div className="text-xs text-gray-500 mt-1">
                                         {hourStart.toLocaleDateString()}
                                       </div>
                                     </td>
-                                    <td className="py-3 px-4">{hourData.receipts.toLocaleString()}</td>
-                                    <td className="py-3 px-4">{hourData.addresses}</td>
-                                    <td className="py-3 px-4 text-blue-400">{hourData.star.toLocaleString()}</td>
-                                    <td className="py-3 px-4 text-purple-400">{hourData.night.toFixed(6)}</td>
+                                    <td className="py-4 px-4 font-semibold">{hourData.receipts.toLocaleString()}</td>
+                                    <td className="py-4 px-4">{hourData.addresses}</td>
+                                    <td className="py-4 px-4">
+                                      <span className="text-blue-400 font-semibold">{hourData.star.toLocaleString()}</span>
+                                    </td>
+                                    <td className="py-4 px-4">
+                                      <span className="text-purple-400 font-semibold font-mono">{hourData.night.toFixed(6)}</span>
+                                    </td>
                                   </tr>
                                 );
                               })
@@ -1391,32 +1385,67 @@ function MiningDashboardContent() {
                 {/* Daily View */}
                 {rewardsView === 'daily' && rewardsData.global && (
                   <>
-                    {/* Grand Total */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <StatCard
-                        label="Total Receipts"
-                        value={rewardsData.global.grandTotal.receipts.toLocaleString()}
-                        icon={<CheckCircle2 />}
-                        variant="success"
-                      />
-                      <StatCard
-                        label="Total STAR"
-                        value={rewardsData.global.grandTotal.star.toLocaleString()}
-                        icon={<TrendingUp />}
-                        variant="primary"
-                      />
-                      <StatCard
-                        label="Total NIGHT"
-                        value={rewardsData.global.grandTotal.night.toFixed(6)}
-                        icon={<Target />}
-                        variant="default"
-                      />
+                    {/* Grand Total - Hero Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Total Receipts Card */}
+                      <Card variant="bordered" className="bg-gradient-to-br from-green-900/20 to-green-800/10 border-green-700/50">
+                        <CardContent className="p-6">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-3 bg-green-500/20 rounded-lg">
+                              <CheckCircle2 className="w-6 h-6 text-green-400" />
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-400 font-medium">Total Receipts</p>
+                              <p className="text-4xl font-bold text-white mt-1">
+                                {rewardsData.global.grandTotal.receipts.toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Total STAR Card */}
+                      <Card variant="bordered" className="bg-gradient-to-br from-blue-900/20 to-blue-800/10 border-blue-700/50">
+                        <CardContent className="p-6">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-3 bg-blue-500/20 rounded-lg">
+                              <Award className="w-6 h-6 text-blue-400" />
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-400 font-medium">Total STAR</p>
+                              <p className="text-4xl font-bold text-blue-400 mt-1">
+                                {rewardsData.global.grandTotal.star.toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Total NIGHT Card */}
+                      <Card variant="bordered" className="bg-gradient-to-br from-purple-900/20 to-purple-800/10 border-purple-700/50">
+                        <CardContent className="p-6">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-3 bg-purple-500/20 rounded-lg">
+                              <Zap className="w-6 h-6 text-purple-400" />
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-400 font-medium">Total NIGHT</p>
+                              <p className="text-4xl font-bold text-purple-400 mt-1">
+                                {rewardsData.global.grandTotal.night.toFixed(6)}
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
                     </div>
 
                     {/* Daily Breakdown Table */}
-                    <Card variant="bordered">
+                    <Card variant="bordered" className="bg-gradient-to-br from-gray-900/40 to-gray-800/20">
                       <CardHeader>
-                        <CardTitle className="text-xl">Daily Breakdown</CardTitle>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-5 h-5 text-blue-400" />
+                          <CardTitle className="text-xl">Daily Breakdown</CardTitle>
+                        </div>
                         <CardDescription>
                           STAR and NIGHT rewards by day
                         </CardDescription>
@@ -1424,34 +1453,44 @@ function MiningDashboardContent() {
                       <CardContent>
                         <div className="overflow-x-auto">
                           <table className="w-full text-left">
-                            <thead className="border-b border-gray-700">
-                              <tr className="text-gray-400 text-sm">
-                                <th className="py-3 px-4">Day</th>
-                                <th className="py-3 px-4">Date</th>
-                                <th className="py-3 px-4">Receipts</th>
-                                <th className="py-3 px-4">Addresses</th>
-                                <th className="py-3 px-4">STAR</th>
-                                <th className="py-3 px-4">NIGHT</th>
+                            <thead className="border-b-2 border-gray-700">
+                              <tr className="text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                                <th className="py-4 px-4">Day</th>
+                                <th className="py-4 px-4">Date</th>
+                                <th className="py-4 px-4">Receipts</th>
+                                <th className="py-4 px-4">Addresses</th>
+                                <th className="py-4 px-4">STAR</th>
+                                <th className="py-4 px-4">NIGHT</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-700">
-                              {rewardsData.global.days.map((day: any) => (
-                                <tr key={day.day} className="text-white hover:bg-gray-800/30">
-                                  <td className="py-3 px-4 font-medium">{day.day}</td>
-                                  <td className="py-3 px-4 text-gray-400">{day.date}</td>
-                                  <td className="py-3 px-4">{day.receipts.toLocaleString()}</td>
-                                  <td className="py-3 px-4">{day.addresses || 0}</td>
-                                  <td className="py-3 px-4 text-blue-400">{day.star.toLocaleString()}</td>
-                                  <td className="py-3 px-4 text-purple-400">{day.night.toFixed(6)}</td>
+                            <tbody className="divide-y divide-gray-800">
+                              {rewardsData.global.days.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="py-12 text-center text-gray-500">
+                                    <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                                    <p>No daily data available yet</p>
+                                  </td>
                                 </tr>
-                              ))}
+                              ) : (
+                                rewardsData.global.days.map((day: any) => (
+                                  <tr key={day.day} className="text-white hover:bg-blue-500/5 transition-colors">
+                                    <td className="py-4 px-4">
+                                      <span className="font-bold text-lg text-blue-400">#{day.day}</span>
+                                    </td>
+                                    <td className="py-4 px-4 text-gray-300 font-medium">{day.date}</td>
+                                    <td className="py-4 px-4 font-semibold">{day.receipts.toLocaleString()}</td>
+                                    <td className="py-4 px-4">{day.addresses || 0}</td>
+                                    <td className="py-4 px-4">
+                                      <span className="text-blue-400 font-semibold">{day.star.toLocaleString()}</span>
+                                    </td>
+                                    <td className="py-4 px-4">
+                                      <span className="text-purple-400 font-semibold font-mono">{day.night.toFixed(6)}</span>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
                             </tbody>
                           </table>
-                          {rewardsData.global.days.length === 0 && (
-                            <div className="text-center py-12 text-gray-500">
-                              No daily data available yet
-                            </div>
-                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -1887,6 +1926,467 @@ function MiningDashboardContent() {
                 </Card>
               </>
             )}
+          </div>
+        )}
+
+        {/* Scale Tab */}
+        {activeTab === 'scale' && (
+          <div className="space-y-6">
+            {scaleLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center space-y-4">
+                  <RefreshCw className="w-12 h-12 animate-spin text-blue-500 mx-auto" />
+                  <p className="text-lg text-gray-400">Analyzing system specifications...</p>
+                </div>
+              </div>
+            ) : scaleError || !scaleSpecs || !scaleRecommendations ? (
+              <div className="space-y-4">
+                <Alert variant="error">
+                  <AlertCircle className="w-5 h-5" />
+                  <span>{scaleError || 'Failed to load system specifications'}</span>
+                </Alert>
+                <Button onClick={fetchScaleData} variant="primary">
+                  <RefreshCw className="w-4 h-4" />
+                  Load System Specs
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-2">Performance Scaling</h2>
+                    <p className="text-gray-400">
+                      Optimize BATCH_SIZE and workerThreads based on your hardware
+                    </p>
+                  </div>
+                  <Button onClick={fetchScaleData} variant="outline">
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh
+                  </Button>
+                </div>
+
+                {/* System Tier Badge */}
+                <div className="flex justify-center">
+                  <div className={cn(
+                    'inline-flex items-center gap-3 px-6 py-3 rounded-full border',
+                    scaleRecommendations.systemTier === 'high-end' && 'text-green-400 bg-green-900/20 border-green-700/50',
+                    scaleRecommendations.systemTier === 'mid-range' && 'text-blue-400 bg-blue-900/20 border-blue-700/50',
+                    scaleRecommendations.systemTier === 'entry-level' && 'text-yellow-400 bg-yellow-900/20 border-yellow-700/50',
+                    scaleRecommendations.systemTier === 'low-end' && 'text-orange-400 bg-orange-900/20 border-orange-700/50'
+                  )}>
+                    <Zap className="w-5 h-5" />
+                    <span className="text-lg font-semibold">
+                      System Tier: {scaleRecommendations.systemTier.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* System Specifications */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Card variant="bordered">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Cpu className="w-5 h-5 text-blue-400" />
+                        CPU
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Model:</span>
+                        <span className="font-mono text-white truncate ml-2" title={scaleSpecs.cpu.model}>
+                          {scaleSpecs.cpu.model.substring(0, 25)}...
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Cores:</span>
+                        <span className="font-mono text-white">{scaleSpecs.cpu.cores}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Speed:</span>
+                        <span className="font-mono text-white">{scaleSpecs.cpu.speed} MHz</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Load (1m):</span>
+                        <span className="font-mono text-white">{scaleSpecs.cpu.loadAverage[0].toFixed(2)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card variant="bordered">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Memory className="w-5 h-5 text-purple-400" />
+                        Memory
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Total:</span>
+                        <span className="font-mono text-white">{scaleSpecs.memory.total} GB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Used:</span>
+                        <span className="font-mono text-white">{scaleSpecs.memory.used} GB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Free:</span>
+                        <span className="font-mono text-white">{scaleSpecs.memory.free} GB</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Usage:</span>
+                        <span className="font-mono text-white">{scaleSpecs.memory.usagePercent}%</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card variant="bordered">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Settings className="w-5 h-5 text-green-400" />
+                        System
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Platform:</span>
+                        <span className="font-mono text-white">{scaleSpecs.system.platform}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Architecture:</span>
+                        <span className="font-mono text-white">{scaleSpecs.system.arch}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Uptime:</span>
+                        <span className="font-mono text-white">
+                          {Math.floor(scaleSpecs.system.uptime / 3600)}h {Math.floor((scaleSpecs.system.uptime % 3600) / 60)}m
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Warnings */}
+                {scaleRecommendations.warnings.length > 0 && (
+                  <div className="space-y-2">
+                    {scaleRecommendations.warnings.map((warning: string, index: number) => (
+                      <Alert
+                        key={index}
+                        variant={warning.startsWith('✅') ? 'success' : warning.startsWith('💡') ? 'info' : 'warning'}
+                      >
+                        <span>{warning}</span>
+                      </Alert>
+                    ))}
+                  </div>
+                )}
+
+                {/* Recommendations - Visual Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Worker Threads Card */}
+                  <Card variant="elevated">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Cpu className="w-6 h-6 text-blue-400" />
+                        Worker Threads
+                      </CardTitle>
+                      <CardDescription>
+                        Number of parallel mining threads
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
+                          <span className="text-gray-400">Current:</span>
+                          <span className="text-2xl font-bold text-white">
+                            {scaleRecommendations.workerThreads.current}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-5 h-5 text-green-400" />
+                            <span className="text-green-400 font-semibold">Optimal:</span>
+                          </div>
+                          <span className="text-2xl font-bold text-green-400">
+                            {scaleRecommendations.workerThreads.optimal}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                          <span className="text-blue-400">Conservative:</span>
+                          <span className="text-xl font-bold text-blue-400">
+                            {scaleRecommendations.workerThreads.conservative}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-orange-900/20 border border-orange-700/50 rounded-lg">
+                          <span className="text-orange-400">Maximum:</span>
+                          <span className="text-xl font-bold text-orange-400">
+                            {scaleRecommendations.workerThreads.max}
+                          </span>
+                        </div>
+                      </div>
+
+                      <Alert variant="info">
+                        <Info className="w-4 h-4" />
+                        <span className="text-sm">{scaleRecommendations.workerThreads.explanation}</span>
+                      </Alert>
+
+                      <div className="text-xs text-gray-500 space-y-1">
+                        <p><strong>Location:</strong> lib/mining/orchestrator.ts:42</p>
+                        <p><strong>Variable:</strong> <code className="bg-gray-800 px-1 py-0.5 rounded">private workerThreads = 12;</code></p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Batch Size Card */}
+                  <Card variant="elevated">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Gauge className="w-6 h-6 text-purple-400" />
+                        Batch Size
+                      </CardTitle>
+                      <CardDescription>
+                        Number of hashes computed per batch
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
+                          <span className="text-gray-400">Current:</span>
+                          <span className="text-2xl font-bold text-white">
+                            {scaleRecommendations.batchSize.current}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-5 h-5 text-green-400" />
+                            <span className="text-green-400 font-semibold">Optimal:</span>
+                          </div>
+                          <span className="text-2xl font-bold text-green-400">
+                            {scaleRecommendations.batchSize.optimal}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                          <span className="text-blue-400">Conservative:</span>
+                          <span className="text-xl font-bold text-blue-400">
+                            {scaleRecommendations.batchSize.conservative}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-orange-900/20 border border-orange-700/50 rounded-lg">
+                          <span className="text-orange-400">Maximum:</span>
+                          <span className="text-xl font-bold text-orange-400">
+                            {scaleRecommendations.batchSize.max}
+                          </span>
+                        </div>
+                      </div>
+
+                      <Alert variant="info">
+                        <Info className="w-4 h-4" />
+                        <span className="text-sm">{scaleRecommendations.batchSize.explanation}</span>
+                      </Alert>
+
+                      <div className="text-xs text-gray-500 space-y-1">
+                        <p><strong>Location:</strong> lib/mining/orchestrator.ts:597</p>
+                        <p><strong>Variable:</strong> <code className="bg-gray-800 px-1 py-0.5 rounded">const BATCH_SIZE = 350;</code></p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Performance Notes */}
+                <Card variant="glass">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-yellow-400" />
+                      Performance Tuning Tips
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2 text-sm text-gray-300">
+                      {scaleRecommendations.performanceNotes.map((note: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="text-blue-400 mt-0.5">•</span>
+                          <span>{note}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Logs Tab */}
+        {activeTab === 'logs' && (
+          <div className="space-y-6">
+            <Card variant="bordered">
+              <CardHeader>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-xl flex items-center gap-2">
+                      <Terminal className="w-5 h-5 text-blue-400" />
+                      Mining Log
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      {/* Follow/Unfollow Toggle */}
+                      <Button
+                        variant={autoFollow ? "default" : "ghost"}
+                        size="sm"
+                        onClick={() => setAutoFollow(!autoFollow)}
+                        className="h-8 gap-1.5"
+                        title={autoFollow ? "Auto-scroll enabled" : "Auto-scroll disabled"}
+                      >
+                        {autoFollow ? <PlayIcon className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                        <span className="text-xs">{autoFollow ? 'Following' : 'Paused'}</span>
+                      </Button>
+
+                      {/* Size Toggle */}
+                      <div className="flex gap-1 bg-gray-800 rounded p-1">
+                        <button
+                          onClick={() => setLogHeight('small')}
+                          className={cn(
+                            'px-2 py-1 rounded text-xs transition-colors',
+                            logHeight === 'small' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
+                          )}
+                          title="Small (200px)"
+                        >
+                          S
+                        </button>
+                        <button
+                          onClick={() => setLogHeight('medium')}
+                          className={cn(
+                            'px-2 py-1 rounded text-xs transition-colors',
+                            logHeight === 'medium' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
+                          )}
+                          title="Medium (400px)"
+                        >
+                          M
+                        </button>
+                        <button
+                          onClick={() => setLogHeight('large')}
+                          className={cn(
+                            'px-2 py-1 rounded text-xs transition-colors',
+                            logHeight === 'large' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-white'
+                          )}
+                          title="Large (600px)"
+                        >
+                          L
+                        </button>
+                      </div>
+
+                      {/* Collapse Toggle */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowLogs(!showLogs)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {showLogs ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  {showLogs && (
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => setLogFilter('all')}
+                        className={cn(
+                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                          logFilter === 'all'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        )}
+                      >
+                        All ({logs.length})
+                      </button>
+                      <button
+                        onClick={() => setLogFilter('error')}
+                        className={cn(
+                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                          logFilter === 'error'
+                            ? 'bg-red-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        )}
+                      >
+                        Errors ({logs.filter(l => l.type === 'error').length})
+                      </button>
+                      <button
+                        onClick={() => setLogFilter('warning')}
+                        className={cn(
+                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                          logFilter === 'warning'
+                            ? 'bg-yellow-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        )}
+                      >
+                        Warnings ({logs.filter(l => l.type === 'warning').length})
+                      </button>
+                      <button
+                        onClick={() => setLogFilter('success')}
+                        className={cn(
+                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                          logFilter === 'success'
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        )}
+                      >
+                        Success ({logs.filter(l => l.type === 'success').length})
+                      </button>
+                      <button
+                        onClick={() => setLogFilter('info')}
+                        className={cn(
+                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                          logFilter === 'info'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        )}
+                      >
+                        Info ({logs.filter(l => l.type === 'info').length})
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              {showLogs && (
+                <CardContent>
+                  <div
+                    ref={logContainerRef}
+                    className={cn(
+                      "bg-gray-950 rounded-lg p-4 overflow-y-auto font-mono text-sm space-y-1 scroll-smooth transition-all",
+                      logHeight === 'small' && 'h-[200px]',
+                      logHeight === 'medium' && 'h-[400px]',
+                      logHeight === 'large' && 'h-[600px]'
+                    )}
+                  >
+                    {logs.length === 0 ? (
+                      <p className="text-gray-500 text-center py-8">No logs yet. Start mining to see activity.</p>
+                    ) : (
+                      logs
+                        .filter(log => logFilter === 'all' || log.type === logFilter)
+                        .map((log, index) => (
+                          <div key={index} className="flex items-start gap-2 animate-in fade-in duration-200">
+                            <span className="text-gray-600 shrink-0">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </span>
+                            <span className={cn(
+                              log.type === 'error' && 'text-red-400',
+                              log.type === 'success' && 'text-green-400',
+                              log.type === 'warning' && 'text-yellow-400',
+                              log.type === 'info' && 'text-blue-400'
+                            )}>
+                              {log.message}
+                            </span>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </CardContent>
+              )}
+            </Card>
           </div>
         )}
       </div>

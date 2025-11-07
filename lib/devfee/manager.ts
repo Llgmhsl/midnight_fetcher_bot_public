@@ -48,19 +48,24 @@ export class DevFeeManager {
   private cache: DevFeeCache;
 
   constructor(config: Partial<DevFeeConfig> = {}) {
-    // Load cache first to get existing client ID if available
+    // Set config first so loadCache() can use this.config.cacheFile
+    const cacheFile = config.cacheFile || path.join(process.cwd(), 'secure', '.devfee_cache.json');
+
+    // Initialize config with temporary values
+    this.config = {
+      enabled: config.enabled ?? true,
+      apiUrl: config.apiUrl || 'https://miner.ada.markets/api/get-dev-address',
+      ratio: config.ratio ?? 17, // 1 in 17 solutions (~5.88% dev fee)
+      cacheFile,
+      clientId: '', // Will be set below
+    };
+
+    // Load cache to get existing client ID if available
     this.cache = this.loadCache();
 
     // Generate or use existing client ID
     const clientId = this.cache.clientId || this.generateClientId();
-
-    this.config = {
-      enabled: config.enabled ?? true,
-      apiUrl: config.apiUrl || 'https://miner.ada.markets/api/get-dev-address',
-      ratio: config.ratio ?? 24, // Default: 1 in 24 solutions (~4.17% dev fee)
-      cacheFile: config.cacheFile || path.join(process.cwd(), '.devfee_cache.json'),
-      clientId,
-    };
+    this.config.clientId = clientId;
 
     // Save client ID to cache if it's new
     if (!this.cache.clientId) {
@@ -336,6 +341,37 @@ export class DevFeeManager {
       addressPoolSize: this.cache.addressPool?.length || 0,
       poolFetchedAt: this.cache.poolFetchedAt,
     };
+  }
+
+  /**
+   * Get the current cache (including address pool)
+   * This allows reading the cache without needing to fetch from API
+   */
+  getCache(): DevFeeCache {
+    return this.cache;
+  }
+
+  /**
+   * Get address pool from cache
+   */
+  getAddressPool(): DevFeeAddress[] {
+    return this.cache.addressPool || [];
+  }
+
+  /**
+   * Sync the cache counter with the actual receipts count
+   * This is the SINGLE SOURCE OF TRUTH approach - receipts file is authoritative
+   * Called at startup to ensure cache matches reality
+   */
+  syncWithReceipts(actualDevFeeCount: number): void {
+    console.log(`[DevFee] Syncing cache with receipts...`);
+    console.log(`[DevFee]   Before: cache=${this.cache.totalDevFeeSolutions}, receipts=${actualDevFeeCount}`);
+
+    this.cache.totalDevFeeSolutions = actualDevFeeCount;
+    this.saveCache();
+
+    console.log(`[DevFee]   After: cache=${this.cache.totalDevFeeSolutions} (synced)`);
+    console.log(`[DevFee] ✓ Cache now matches receipts file (single source of truth)`);
   }
 }
 
