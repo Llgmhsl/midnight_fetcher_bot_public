@@ -3,7 +3,31 @@ import path from 'path';
 import { Lucid, toHex } from 'lucid-cardano';
 import { encrypt, decrypt, EncryptedData } from './encryption';
 
-const SECURE_DIR = path.join(process.cwd(), 'secure');
+// Determine data directory: Check installation folder first (for existing users),
+// then fall back to Documents folder (for new users and easier updates)
+function determineDataDirectory(): string {
+  const oldSecureDir = path.join(process.cwd(), 'secure');
+  const newDataDir = path.join(
+    process.env.USERPROFILE || process.env.HOME || process.cwd(),
+    'Documents',
+    'MidnightFetcherBot'
+  );
+
+  // Check if wallet exists in old location (installation folder)
+  const oldWalletFile = path.join(oldSecureDir, 'wallet-seed.json.enc');
+  if (fs.existsSync(oldWalletFile)) {
+    console.log(`[Wallet] Found existing wallet in installation folder`);
+    console.log(`[Wallet] Using: ${path.join(process.cwd(), 'secure')}`);
+    return process.cwd();
+  }
+
+  // Otherwise use Documents folder (new default)
+  console.log(`[Wallet] Using Documents folder: ${newDataDir}`);
+  return newDataDir;
+}
+
+const DATA_DIR = determineDataDirectory();
+const SECURE_DIR = path.join(DATA_DIR, 'secure');
 const SEED_FILE = path.join(SECURE_DIR, 'wallet-seed.json.enc');
 const DERIVED_ADDRESSES_FILE = path.join(SECURE_DIR, 'derived-addresses.json');
 

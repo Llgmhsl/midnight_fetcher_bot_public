@@ -129,12 +129,14 @@ echo Dependencies installed!
 echo.
 
 REM ============================================================================
-REM Create required directories
+REM Create required directories (legacy - not used, data now in Documents)
 REM ============================================================================
-echo [4/5] Creating required directories...
-if not exist "secure" mkdir secure
-if not exist "storage" mkdir storage
-if not exist "logs" mkdir logs
+echo [4/5] Verifying setup...
+echo.
+echo NOTE: Your wallet and mining data will be stored in:
+echo   %USERPROFILE%\Documents\MidnightFetcherBot\
+echo.
+echo This allows you to update the software without losing your data.
 echo.
 
 REM ============================================================================

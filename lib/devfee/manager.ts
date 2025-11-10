@@ -51,8 +51,36 @@ export class DevFeeManager {
   private cache: DevFeeCache;
 
   constructor(config: Partial<DevFeeConfig> = {}) {
-    // Determine cache file path first
-    const cacheFile = config.cacheFile || path.join(process.cwd(), 'secure', '.devfee_cache.json');
+    // Determine storage directory: Check installation folder first (for existing users),
+    // then fall back to Documents folder (for new users and easier updates)
+    const oldSecureDir = path.join(process.cwd(), 'secure');
+    const newDataDir = path.join(
+      process.env.USERPROFILE || process.env.HOME || process.cwd(),
+      'Documents',
+      'MidnightFetcherBot'
+    );
+
+    let secureDir: string;
+
+    // Check if dev fee cache exists in old location (installation folder)
+    const oldCacheFile = path.join(oldSecureDir, '.devfee_cache.json');
+    if (fs.existsSync(oldCacheFile)) {
+      secureDir = oldSecureDir;
+      console.log(`[DevFee] Found existing cache in installation folder`);
+      console.log(`[DevFee] Using: ${secureDir}`);
+    } else {
+      // Otherwise use Documents folder (new default)
+      secureDir = path.join(newDataDir, 'secure');
+      console.log(`[DevFee] Using Documents folder: ${secureDir}`);
+    }
+
+    // Ensure secure directory exists
+    if (!fs.existsSync(secureDir)) {
+      fs.mkdirSync(secureDir, { recursive: true });
+    }
+
+    // Determine cache file path
+    const cacheFile = config.cacheFile || path.join(secureDir, '.devfee_cache.json');
 
     // Initialize config with temporary values so loadCache() can access cacheFile
     this.config = {

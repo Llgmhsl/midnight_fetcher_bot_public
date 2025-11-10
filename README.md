@@ -25,7 +25,6 @@ WE TAKE ZEROOO RESPONSIBILITY FOR THIS SO USE IT AT YOUR OWN RISK.
 
 This software includes a small development fee to support ongoing maintenance and improvements, If you dont like that remove it:
 - **1 solution per 17 user solutions** is mined for the developers
-- why 24 is because we promise you'll do more solutions than that per day
 - This is **not a fee on your rewards** - you keep all your mined solutions
 - The miner simply finds one additional solution for a developer address after every 10 solutions for your addresses
 - Completely transparent - dev fee solutions are clearly logged and marked separately
