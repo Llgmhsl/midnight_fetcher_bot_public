@@ -1965,7 +1965,7 @@ class MiningOrchestrator extends EventEmitter {
    */
   private async fetchChallenge(): Promise<ChallengeResponse> {
     const response = await axios.get(`${this.apiBase}/challenge`, {
-      timeout: 30000, // 30 second timeout for challenge fetch
+      timeout: 60000, // 60 second timeout for challenge fetch (matches submission timeout)
     });
     return response.data;
   }
@@ -2043,7 +2043,7 @@ class MiningOrchestrator extends EventEmitter {
 
     // Get T&C message
     const tandcResp = await axios.get(`${this.apiBase}/TandC`, {
-      timeout: 30000, // 30 second timeout
+      timeout: 60000, // 60 second timeout (matches other API calls)
     });
     const message = tandcResp.data.message;
 
@@ -2053,7 +2053,7 @@ class MiningOrchestrator extends EventEmitter {
     // Register
     const registerUrl = `${this.apiBase}/register/${addr.bech32}/${signature}/${addr.publicKeyHex}`;
     await axios.post(registerUrl, {}, {
-      timeout: 30000, // 30 second timeout
+      timeout: 60000, // 60 second timeout (matches other API calls)
     });
 
     // Mark as registered

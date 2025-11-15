@@ -18,7 +18,7 @@ class HashEngine {
     this.hashClient = new HashClient(hashServiceUrl, {
       maxConnectionsPerUrl: 200, // Supports up to 80-100 concurrent workers
       keepAliveTimeout: 60000,
-      requestTimeout: 10000,
+      requestTimeout: 20000, // 20 second timeout to handle hash service under load
       maxRetries: 3,
       retryDelayMs: 100,
     });

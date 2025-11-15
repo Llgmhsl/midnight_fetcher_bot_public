@@ -37,22 +37,98 @@ export async function GET(request: NextRequest) {
 
     let enrichedAddresses;
 
-    if (includeAll && addressData) {
-      // Include all addresses from orchestrator (registered addresses)
-      enrichedAddresses = addressData.addresses.map((addr: any) => {
-        const hasSolutions = (solutionsByAddress.get(addr.bech32) || 0) > 0;
-        const solvedCurrentChallenge = currentChallengeId
-          ? addressData.solvedAddressChallenges.get(addr.bech32)?.has(currentChallengeId) || false
-          : false;
+    if (includeAll) {
+      // If includeAll=true, load ALL addresses from wallet (not just from orchestrator)
+      // This ensures we get all 200 addresses even if mining is stopped or storage folder was deleted
 
-        return {
-          index: addr.index,
-          bech32: addr.bech32,
-          registered: addr.registered || hasSolutions,
-          solvedCurrentChallenge,
-          totalSolutions: solutionsByAddress.get(addr.bech32) || 0,
-        };
-      }).sort((a: any, b: any) => a.index - b.index);
+      // Determine wallet path (same logic as WalletManager)
+      const oldWalletPath = path.join(process.cwd(), 'secure', '.wallet');
+      const newWalletDir = path.join(
+        process.env.USERPROFILE || process.env.HOME || process.cwd(),
+        'Documents',
+        'MidnightFetcherBot',
+        'secure'
+      );
+      const newWalletPath = path.join(newWalletDir, '.wallet');
+
+      let walletPath: string;
+      if (fs.existsSync(oldWalletPath)) {
+        walletPath = oldWalletPath;
+      } else {
+        walletPath = newWalletPath;
+      }
+
+      if (fs.existsSync(walletPath)) {
+        try {
+          const walletData = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
+          const walletAddresses = walletData.addresses || [];
+
+          // Build enriched addresses from ALL wallet addresses
+          enrichedAddresses = walletAddresses.map((addr: any) => {
+            const hasSolutions = (solutionsByAddress.get(addr.bech32) || 0) > 0;
+
+            // Check orchestrator data if available
+            let solvedCurrentChallenge = false;
+            if (addressData) {
+              const orchestratorAddr = addressData.addresses.find((a: any) => a.index === addr.index);
+              if (orchestratorAddr) {
+                solvedCurrentChallenge = currentChallengeId
+                  ? addressData.solvedAddressChallenges.get(addr.bech32)?.has(currentChallengeId) || false
+                  : false;
+              }
+            }
+
+            return {
+              index: addr.index,
+              bech32: addr.bech32,
+              registered: addr.registered || hasSolutions,
+              solvedCurrentChallenge,
+              totalSolutions: solutionsByAddress.get(addr.bech32) || 0,
+            };
+          }).sort((a: any, b: any) => a.index - b.index);
+        } catch (err) {
+          console.error('[API] Failed to read wallet file, falling back to orchestrator data:', err);
+          // Fallback to orchestrator data if wallet read fails
+          if (addressData) {
+            enrichedAddresses = addressData.addresses.map((addr: any) => {
+              const hasSolutions = (solutionsByAddress.get(addr.bech32) || 0) > 0;
+              const solvedCurrentChallenge = currentChallengeId
+                ? addressData.solvedAddressChallenges.get(addr.bech32)?.has(currentChallengeId) || false
+                : false;
+
+              return {
+                index: addr.index,
+                bech32: addr.bech32,
+                registered: addr.registered || hasSolutions,
+                solvedCurrentChallenge,
+                totalSolutions: solutionsByAddress.get(addr.bech32) || 0,
+              };
+            }).sort((a: any, b: any) => a.index - b.index);
+          } else {
+            // No wallet file and no orchestrator data - use receipts only
+            enrichedAddresses = [];
+          }
+        }
+      } else if (addressData) {
+        // No wallet file found, fallback to orchestrator
+        enrichedAddresses = addressData.addresses.map((addr: any) => {
+          const hasSolutions = (solutionsByAddress.get(addr.bech32) || 0) > 0;
+          const solvedCurrentChallenge = currentChallengeId
+            ? addressData.solvedAddressChallenges.get(addr.bech32)?.has(currentChallengeId) || false
+            : false;
+
+          return {
+            index: addr.index,
+            bech32: addr.bech32,
+            registered: addr.registered || hasSolutions,
+            solvedCurrentChallenge,
+            totalSolutions: solutionsByAddress.get(addr.bech32) || 0,
+          };
+        }).sort((a: any, b: any) => a.index - b.index);
+      } else {
+        // No wallet file and no orchestrator data - return empty
+        enrichedAddresses = [];
+      }
     } else {
       // Build address list from receipts only
       enrichedAddresses = Array.from(addressesByIndex.entries())
