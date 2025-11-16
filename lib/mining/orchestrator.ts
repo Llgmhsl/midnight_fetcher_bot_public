@@ -44,7 +44,7 @@ class MiningOrchestrator extends EventEmitter {
   private readonly CPU_SMOOTHING_WINDOW = 5; // Number of readings to average
   private addressesProcessedCurrentChallenge = new Set<number>(); // Track which address indexes have processed current challenge
   private solutionTimestamps: SolutionTimestamp[] = []; // Track all solution timestamps for hourly/daily stats
-  private workerThreads = 11; // Number of parallel mining threads
+  private workerThreads = 94; // Number of parallel mining threads
   private submittedSolutions = new Set<string>(); // Track submitted solution hashes to avoid duplicates
   private solvedAddressChallenges = new Map<string, Set<string>>(); // Map: address -> Set of solved challenge_ids
   private userSolutionsCount = 0; // Track non-dev-fee solutions for dev fee trigger
@@ -126,7 +126,7 @@ class MiningOrchestrator extends EventEmitter {
    * Get current batch size (custom or default)
    */
   private getBatchSize(): number {
-    return this.customBatchSize || 300; // Default BATCH_SIZE
+    return this.customBatchSize || 2300; // Default BATCH_SIZE
   }
 
   /**
