@@ -118,13 +118,17 @@ function MiningDashboardContent() {
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers' | 'addresses' | 'logs' | 'scale' | 'devfee' | 'consolidate'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'rewards' | 'workers' | 'addresses' | 'scale' | 'devfee' | 'consolidate' | 'diagnostics'>('dashboard');
   const [history, setHistory] = useState<HistoryData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'success' | 'error'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [failureModalOpen, setFailureModalOpen] = useState(false);
   const [selectedAddressHistory, setSelectedAddressHistory] = useState<AddressHistory | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<{ id: string; message: string } | null>(null);
+  const [retrySuccess, setRetrySuccess] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Workers state
   const [workers, setWorkers] = useState<Map<number, WorkerStats>>(new Map());
@@ -157,6 +161,8 @@ function MiningDashboardContent() {
   // Consolidate state
   const [consolidateLoading, setConsolidateLoading] = useState(false);
   const consolidateRunningRef = useRef(false); // Ref to track running state in async loop
+  const [consolidateMode, setConsolidateMode] = useState<'receipts' | 'all-registered'>('receipts'); // Mode for continuous consolidation
+  const [includeNextUnused, setIncludeNextUnused] = useState(false); // Include next 10 unused addresses
   const [consolidateProgress, setConsolidateProgress] = useState<{
     current: number;
     total: number;
@@ -186,7 +192,7 @@ function MiningDashboardContent() {
   // Modal state for consolidation messages
   const [consolidateModal, setConsolidateModal] = useState<{
     open: boolean;
-    type: 'confirm' | 'success' | 'error' | 'password';
+    type: 'confirm' | 'success' | 'error' | 'password' | 'mode-select';
     title: string;
     message: string;
     onConfirm?: () => void;
@@ -201,6 +207,7 @@ function MiningDashboardContent() {
   const [modalPassword, setModalPassword] = useState<string>('');
   const modalPasswordRef = useRef<string>('');
   const consolidateHandlerRef = useRef<((password: string) => Promise<void>) | null>(null);
+  const consolidateHandlerRunning = useRef(false); // Prevent duplicate execution
 
   // DevFee state
   const [devFeeEnabled, setDevFeeEnabled] = useState<boolean>(true);
@@ -208,6 +215,11 @@ function MiningDashboardContent() {
   const [devFeeData, setDevFeeData] = useState<any | null>(null);
   const [historyLastRefresh, setHistoryLastRefresh] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Diagnostics state
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
+  const [diagnosticsResults, setDiagnosticsResults] = useState<any | null>(null);
+  const [diagnosticsPassword, setDiagnosticsPassword] = useState<string>('');
 
   // Helper function to get destination address based on mode
   const getDestinationAddress = (addresses: any[]) => {
@@ -217,6 +229,386 @@ function MiningDashboardContent() {
       const addr = addresses.find((a: any) => a.index === destinationAddressIndex);
       return addr?.bech32 || '';
     }
+  };
+
+  // Start consolidation flow with selected mode
+  const startConsolidationFlow = async (mode: 'receipts' | 'all-registered', shouldIncludeNext: boolean) => {
+    setConsolidateMode(mode);
+
+    // Create the consolidation handler
+    consolidateHandlerRef.current = async (password: string) => {
+      setConsolidateLoading(true);
+      consolidateRunningRef.current = true;
+      setConsolidateResults([]);
+
+      try {
+        console.log(`[Consolidate] Starting consolidation in ${mode} mode (includeNext: ${shouldIncludeNext})...`);
+
+        // Fetch addresses based on mode
+        let addresses;
+        if (mode === 'receipts') {
+          // Use existing addressesData from receipts
+          if (!addressesData || !addressesData.addresses) {
+            throw new Error('Addresses not loaded. Please refresh the page.');
+          }
+          addresses = addressesData.addresses;
+        } else {
+          // Fetch all registered addresses
+          const response = await fetch('/api/mining/addresses?includeAll=true');
+          const data = await response.json();
+          if (!data.success) {
+            throw new Error('Failed to load all addresses');
+          }
+          addresses = data.addresses;
+        }
+
+        console.log(`[Consolidate] Using ${addresses.length} addresses (mode: ${mode})`);
+
+        // If includeNextUnused is enabled, add the next 10 unused addresses
+        if (shouldIncludeNext) {
+          const maxIndex = Math.max(...addresses.map((a: any) => a.index));
+          console.log(`[Consolidate] Max index in current addresses: ${maxIndex}`);
+
+          // Fetch all addresses to get the next 10 after maxIndex
+          const response = await fetch('/api/mining/addresses?includeAll=true');
+          const data = await response.json();
+
+          if (data.success && data.addresses) {
+            const allAddresses = data.addresses;
+
+            // Filter to get the next 10 addresses after maxIndex
+            const nextTen = allAddresses
+              .filter((a: any) => a.index > maxIndex && a.index <= maxIndex + 10)
+              .sort((a: any, b: any) => a.index - b.index);
+
+            console.log(`[Consolidate] Found ${nextTen.length} additional addresses (indices ${maxIndex + 1} to ${maxIndex + 10})`);
+
+            // Add them to the existing addresses (avoid duplicates)
+            const existingIndices = new Set(addresses.map((a: any) => a.index));
+            const newAddresses = nextTen.filter((a: any) => !existingIndices.has(a.index));
+
+            addresses = [...addresses, ...newAddresses];
+            console.log(`[Consolidate] Added ${newAddresses.length} new addresses. Total: ${addresses.length}`);
+          } else {
+            console.warn('[Consolidate] Failed to fetch additional addresses');
+          }
+        }
+
+        // Get destination address
+        const destinationAddress = getDestinationAddress(addresses);
+        if (!destinationAddress) {
+          throw new Error('Invalid destination address');
+        }
+
+        // Fetch consolidation history
+        const historyRecords = await fetchConsolidationHistory();
+
+        // Initialize all addresses as pending
+        setConsolidateResults(addresses.map((addr: any) => {
+          const addressHistory = historyRecords.filter((r: any) => r.sourceAddress === addr.bech32);
+          return {
+            index: addr.index,
+            address: addr.bech32,
+            status: (destinationMode === 'wallet' && addr.index === destinationAddressIndex) ? 'skipped' : 'pending',
+            message: (destinationMode === 'wallet' && addr.index === destinationAddressIndex) ? 'Destination address' : '',
+            consolidationHistory: addressHistory,
+          };
+        }));
+
+        // Prepare addresses for batch signing (exclude destination)
+        const addressesToSign = addresses.filter((addr: any) => {
+          if (destinationMode === 'wallet' && addr.index === destinationAddressIndex) {
+            return false;
+          }
+          if (destinationMode === 'custom' && addr.bech32 === destinationAddress) {
+            return false;
+          }
+          return true;
+        });
+
+        console.log(`[Consolidate] Batch signing ${addressesToSign.length} addresses...`);
+
+        // Batch sign all addresses at once
+        const batchSignResponse = await fetch('/api/wallet/sign-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            password,
+            addresses: addressesToSign.map((addr: any) => ({
+              sourceAddressIndex: addr.index,
+              sourceAddress: addr.bech32,
+              destinationAddress: destinationAddress,
+            })),
+          }),
+        });
+
+        const batchSignData = await batchSignResponse.json();
+        if (!batchSignData.success) {
+          throw new Error(batchSignData.error || 'Failed to sign messages');
+        }
+
+        // Create a map of signatures by address index
+        const signatureMap = new Map(
+          batchSignData.signatures.map((s: any) => [s.sourceAddressIndex, s.signature])
+        );
+
+        console.log(`[Consolidate] Batch signing complete. Starting submissions...`);
+
+        // Track consolidated addresses to avoid re-processing
+        const consolidatedAddresses = new Set<number>(); // Set of address indices
+        const failedAddresses = new Set<number>(); // Set of failed address indices
+        const startTime = Date.now();
+
+        // Continuous loop
+        let cycleCount = 0;
+        const delayBetweenRequests = mode === 'all-registered' ? 3000 : 2000; // 3s for all, 2s for receipts
+        const delayBetweenCycles = mode === 'all-registered' ? 15000 : 5000; // 15s for all, 5s for receipts
+
+        while (consolidateRunningRef.current) {
+          cycleCount++;
+          console.log(`[Consolidate] Starting cycle ${cycleCount}`);
+
+          let successCount = 0;
+          let failCount = 0;
+          let current = 0;
+
+          // In cycle 1: process all addresses
+          // In cycle 2+: only process failed addresses from previous cycle
+          const addressesToProcess = cycleCount === 1
+            ? addressesToSign
+            : addressesToSign.filter((addr: any) => failedAddresses.has(addr.index));
+
+          const total = addressesToProcess.length;
+
+          if (total === 0) {
+            console.log(`[Consolidate] No addresses to process in cycle ${cycleCount}`);
+            break;
+          }
+
+          // Clear failed set for this cycle (will repopulate with still-failing addresses)
+          if (cycleCount > 1) {
+            failedAddresses.clear();
+          }
+
+          for (const addr of addressesToProcess) {
+            if (!consolidateRunningRef.current) break;
+
+            current++;
+            setConsolidateProgress({
+              current,
+              total,
+              successCount,
+              failCount,
+              currentAddress: addr.bech32,
+            });
+
+            try {
+              console.log(`[Consolidate] Submitting address ${addr.index}...`);
+
+              const signature = signatureMap.get(addr.index);
+              if (!signature) {
+                throw new Error('Signature not found for this address');
+              }
+
+              // Submit signature to Midnight API
+              const donateResponse = await fetch('/api/consolidate/donate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sourceAddress: addr.bech32,
+                  sourceIndex: addr.index,
+                  destinationAddress: destinationAddress,
+                  destinationIndex: destinationMode === 'wallet' ? destinationAddressIndex : undefined,
+                  destinationMode,
+                  signature,
+                }),
+              });
+
+              const donateData = await donateResponse.json();
+
+              if (donateData.success) {
+                successCount++;
+                consolidatedAddresses.add(addr.index); // Mark as successfully consolidated
+
+                // Refresh consolidation history
+                const updatedHistory = await fetchConsolidationHistory();
+
+                const message = donateData.solutionsConsolidated > 0
+                  ? `Consolidated ${donateData.solutionsConsolidated} solution${donateData.solutionsConsolidated !== 1 ? 's' : ''}`
+                  : 'No new solutions to consolidate';
+
+                setConsolidateResults(prev =>
+                  prev.map(r => {
+                    if (r.index === addr.index) {
+                      const addressHistory = updatedHistory.filter((h: any) => h.sourceAddress === addr.bech32);
+                      return {
+                        ...r,
+                        status: 'success',
+                        message,
+                        solutionsConsolidated: donateData.solutionsConsolidated,
+                        consolidationHistory: addressHistory,
+                      };
+                    }
+                    return r;
+                  })
+                );
+              } else {
+                // Check if error is about already being consolidated
+                const errorMsg = donateData.error || '';
+                const isAlreadyConsolidated = donateData.alreadyDonated ||
+                                              errorMsg.toLowerCase().includes('already') ||
+                                              errorMsg.toLowerCase().includes('no solutions') ||
+                                              errorMsg.toLowerCase().includes('nothing to') ||
+                                              errorMsg.toLowerCase().includes('donated');
+
+                if (isAlreadyConsolidated) {
+                  // Treat as success with 0 solutions
+                  consolidatedAddresses.add(addr.index); // Mark as successfully consolidated
+                  setConsolidateResults(prev =>
+                    prev.map(r =>
+                      r.index === addr.index
+                        ? { ...r, status: 'success', message: 'Already consolidated (0 new solutions)' }
+                        : r
+                    )
+                  );
+                } else {
+                  // Real error - mark as failed for retry
+                  failCount++;
+                  failedAddresses.add(addr.index);
+
+                  const isTimeout = donateData.isTimeout || errorMsg.toLowerCase().includes('timeout');
+                  const displayMessage = isTimeout
+                    ? `Timeout: ${errorMsg}`
+                    : errorMsg;
+
+                  setConsolidateResults(prev =>
+                    prev.map(r =>
+                      r.index === addr.index
+                        ? { ...r, status: 'failed', message: displayMessage }
+                        : r
+                    )
+                  );
+                }
+              }
+            } catch (err: any) {
+              failCount++;
+              failedAddresses.add(addr.index); // Mark as failed for retry
+              console.error(`[Consolidate] Error for address ${addr.index}:`, err);
+              setConsolidateResults(prev =>
+                prev.map(r =>
+                  r.index === addr.index
+                    ? { ...r, status: 'failed', message: err.message }
+                    : r
+                )
+              );
+            }
+
+            setConsolidateProgress({
+              current,
+              total,
+              successCount,
+              failCount,
+              currentAddress: addr.bech32,
+            });
+
+            // Delay between requests
+            await new Promise(resolve => setTimeout(resolve, delayBetweenRequests));
+          }
+
+          console.log(`[Consolidate] Cycle ${cycleCount} complete. Success: ${successCount}, Failed: ${failCount}`);
+
+          // Check if we should continue
+          const hasFailures = failedAddresses.size > 0;
+          const shouldContinue = hasFailures && cycleCount < 3; // Max 3 cycles
+
+          if (!shouldContinue) {
+            const reason = !hasFailures
+              ? 'All addresses consolidated successfully'
+              : `Maximum retry attempts reached (${cycleCount} cycles)`;
+            console.log(`[Consolidate] Stopping: ${reason}`);
+            consolidateRunningRef.current = false;
+            break;
+          }
+
+          // Wait before next cycle (retry failed addresses)
+          if (consolidateRunningRef.current && hasFailures) {
+            console.log(`[Consolidate] ${failedAddresses.size} addresses failed. Retrying in ${delayBetweenCycles / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, delayBetweenCycles));
+          }
+        }
+
+        // Show completion summary
+        const duration = Date.now() - startTime;
+        const durationSeconds = Math.floor(duration / 1000);
+        const minutes = Math.floor(durationSeconds / 60);
+        const seconds = durationSeconds % 60;
+        const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+
+        const totalSuccess = consolidatedAddresses.size;
+        const totalFailed = failedAddresses.size;
+        const totalSolutions = addressesToSign.reduce((sum: number, addr: any) => {
+          const result = consolidateResults.find(r => r.index === addr.index);
+          return sum + (result?.solutionsConsolidated || 0);
+        }, 0);
+
+        console.log(`[Consolidate] Complete! Duration: ${durationStr}, Success: ${totalSuccess}, Failed: ${totalFailed}, Solutions: ${totalSolutions}`);
+
+        // Show summary modal
+        setConsolidateModal({
+          open: true,
+          type: 'success',
+          title: 'Consolidation Complete',
+          message: `Duration: ${durationStr}\n\n✓ Successful: ${totalSuccess}\n✗ Failed: ${totalFailed}\n\nTotal Solutions Consolidated: ${totalSolutions}\n\nClick "Download History" below to save a detailed report.`,
+        });
+      } catch (error: any) {
+        console.error('[Consolidate] Error:', error);
+        setConsolidateModal({
+          open: true,
+          type: 'error',
+          title: 'Consolidation Error',
+          message: error.message || 'An error occurred during consolidation.',
+        });
+      } finally {
+        setConsolidateLoading(false);
+        consolidateRunningRef.current = false;
+        setConsolidateProgress(null);
+      }
+    };
+
+    // Show password modal
+    setModalPassword('');
+    modalPasswordRef.current = '';
+    setConsolidateModal({
+      open: true,
+      type: 'password',
+      title: 'Start Continuous Consolidation',
+      message: `Enter your wallet password to begin consolidating rewards from ${mode === 'receipts' ? 'addresses with receipts' : 'all registered addresses'}.`,
+      requirePassword: true,
+      onConfirm: async () => {
+        // Prevent duplicate execution
+        if (consolidateHandlerRunning.current) {
+          console.log('[Consolidate] Handler already running, skipping duplicate execution');
+          return;
+        }
+
+        if (consolidateHandlerRef.current && modalPasswordRef.current) {
+          consolidateHandlerRunning.current = true;
+          const password = modalPasswordRef.current; // Store password before clearing
+
+          // Close the password modal immediately
+          setConsolidateModal({ open: false, type: 'success', title: '', message: '' });
+          setModalPassword('');
+          modalPasswordRef.current = '';
+
+          try {
+            // Start the consolidation process
+            await consolidateHandlerRef.current(password);
+          } finally {
+            consolidateHandlerRunning.current = false;
+          }
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -650,6 +1042,70 @@ function MiningDashboardContent() {
     return `${hours}h ${minutes % 60}m ago`;
   };
 
+  const isWithin24Hours = (timestamp: string): boolean => {
+    const errorTime = new Date(timestamp).getTime();
+    const now = Date.now();
+    const hoursSinceError = (now - errorTime) / (1000 * 60 * 60);
+    return hoursSinceError <= 24;
+  };
+
+  const retrySolution = async (address: string, challengeId: string, nonce: string, entryId: string) => {
+    setRetryingId(entryId);
+    setRetryError(null);
+    setRetrySuccess(null);
+
+    try {
+      const response = await fetch('/api/mining/retry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address,
+          challengeId,
+          nonce,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Show detailed error message
+        const errorMessage = data.details
+          ? `${data.error}: ${JSON.stringify(data.details, null, 2)}`
+          : data.message || data.error || 'Failed to retry solution';
+
+        setRetryError({ id: entryId, message: errorMessage });
+        setToastMessage({ message: `Retry failed: ${data.error || 'Unknown error'}`, type: 'error' });
+        setTimeout(() => {
+          setRetryError(null);
+          setToastMessage(null);
+        }, 5000);
+      } else {
+        setRetrySuccess(entryId);
+        setToastMessage({ message: '✓ Solution retried successfully!', type: 'success' });
+        setTimeout(() => {
+          setRetrySuccess(null);
+          setToastMessage(null);
+        }, 3000);
+        // Refresh history to show the new successful submission
+        await fetchHistory();
+      }
+    } catch (err: any) {
+      setRetryError({
+        id: entryId,
+        message: `Network error: ${err.message}`
+      });
+      setToastMessage({ message: `Network error: ${err.message}`, type: 'error' });
+      setTimeout(() => {
+        setRetryError(null);
+        setToastMessage(null);
+      }, 5000);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   // Load history when switching to dashboard or history tab and auto-refresh every 30 seconds
   useEffect(() => {
     if (activeTab === 'dashboard' || activeTab === 'history') {
@@ -677,6 +1133,56 @@ function MiningDashboardContent() {
   useEffect(() => {
     if (activeTab === 'addresses') {
       fetchAddresses();
+    }
+  }, [activeTab]);
+
+  // Load version info when switching to diagnostics tab
+  useEffect(() => {
+    if (activeTab === 'diagnostics') {
+      const loadVersion = async () => {
+        try {
+          const response = await fetch('/api/version?checkUpdate=true');
+          const data = await response.json();
+
+          const versionEl = document.getElementById('version-info');
+          const storageEl = document.getElementById('storage-path');
+          const secureEl = document.getElementById('secure-path');
+          const updateEl = document.getElementById('update-status');
+
+          if (data.success) {
+            if (versionEl) {
+              versionEl.textContent = `v${data.version}-${data.commit} | ${data.branch} | Built: ${new Date(data.buildDate).toLocaleString()}`;
+            }
+
+            if (storageEl) {
+              storageEl.textContent = data.storagePath;
+            }
+
+            if (secureEl) {
+              secureEl.textContent = data.securePath;
+            }
+
+            if (updateEl && data.updateCheck) {
+              if (data.updateCheck.updateAvailable) {
+                const behindText = data.updateCheck.commitsBehind > 0
+                  ? ` (${data.updateCheck.commitsBehind} commits behind)`
+                  : '';
+                updateEl.innerHTML = `<span class="text-yellow-400">⚠️ Update available${behindText}</span>`;
+                updateEl.innerHTML += `<br><span class="text-xs text-gray-400">Latest: ${data.updateCheck.latestCommit} | Your version: ${data.updateCheck.currentCommit}</span>`;
+              } else {
+                updateEl.innerHTML = `<span class="text-green-400">✓ Up to date</span>`;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch version:', err);
+          const versionEl = document.getElementById('version-info');
+          if (versionEl) {
+            versionEl.textContent = 'Failed to load version';
+          }
+        }
+      };
+      loadVersion();
     }
   }, [activeTab]);
 
@@ -724,6 +1230,29 @@ function MiningDashboardContent() {
 
   return (
     <div className="relative min-h-screen p-4 md:p-8 overflow-hidden">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 duration-300">
+          <div className={cn(
+            "px-6 py-4 rounded-lg shadow-2xl border-2 flex items-center gap-3 min-w-[300px] max-w-[500px]",
+            toastMessage.type === 'success' && "bg-green-900/90 border-green-500/50 text-green-100",
+            toastMessage.type === 'error' && "bg-red-900/90 border-red-500/50 text-red-100",
+            toastMessage.type === 'info' && "bg-blue-900/90 border-blue-500/50 text-blue-100"
+          )}>
+            {toastMessage.type === 'success' && <CheckCircle2 className="w-5 h-5 flex-shrink-0" />}
+            {toastMessage.type === 'error' && <XCircle className="w-5 h-5 flex-shrink-0" />}
+            {toastMessage.type === 'info' && <Info className="w-5 h-5 flex-shrink-0" />}
+            <span className="font-medium">{toastMessage.message}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="ml-auto text-white/70 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Background decoration */}
       <div className="absolute inset-0 bg-gradient-to-br from-purple-900/10 via-blue-900/10 to-gray-900 pointer-events-none" />
       <div className="absolute top-20 left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -928,17 +1457,17 @@ function MiningDashboardContent() {
             )}
           </button>
           <button
-            onClick={() => setActiveTab('logs')}
+            onClick={() => setActiveTab('diagnostics')}
             className={cn(
               'px-6 py-3 font-medium transition-colors relative',
-              activeTab === 'logs'
+              activeTab === 'diagnostics'
                 ? 'text-blue-400'
                 : 'text-gray-400 hover:text-gray-300'
             )}
           >
-            <Terminal className="w-4 h-4 inline mr-2" />
-            Logs
-            {activeTab === 'logs' && (
+            <Activity className="w-4 h-4 inline mr-2" />
+            Diagnostics
+            {activeTab === 'diagnostics' && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400" />
             )}
           </button>
@@ -1561,6 +2090,86 @@ function MiningDashboardContent() {
                                     </div>
                                   )}
 
+                                  {/* Retry button for failed solutions (if within 24 hours) */}
+                                  {addressHistory.status === 'failed' && addressHistory.failures.length > 0 && (() => {
+                                    const latestFailure = addressHistory.failures[addressHistory.failures.length - 1];
+                                    const failureTime = new Date(latestFailure.ts).getTime();
+                                    const now = Date.now();
+                                    const hoursSince = (now - failureTime) / (1000 * 60 * 60);
+                                    const within24Hours = hoursSince <= 24;
+                                    const retryId = `retry-main-${addressHistory.addressIndex}-${addressHistory.challengeId}`;
+
+                                    return within24Hours ? (
+                                      <Button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          setRetryingId(retryId);
+                                          setRetryError(null);
+                                          setRetrySuccess(null);
+
+                                          try {
+                                            const response = await fetch('/api/mining/retry', {
+                                              method: 'POST',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({
+                                                address: addressHistory.address,
+                                                challengeId: addressHistory.challengeId,
+                                                nonce: latestFailure.nonce,
+                                              }),
+                                            });
+
+                                            const data = await response.json();
+
+                                            if (!response.ok) {
+                                              const errorMessage = data.details
+                                                ? `${data.error}: ${JSON.stringify(data.details, null, 2)}`
+                                                : data.message || data.error || 'Failed to retry solution';
+                                              setRetryError({ id: retryId, message: errorMessage });
+                                              setToastMessage({ message: `Retry failed: ${data.error || 'Unknown error'}`, type: 'error' });
+                                              setTimeout(() => {
+                                                setRetryError(null);
+                                                setToastMessage(null);
+                                              }, 5000);
+                                            } else {
+                                              setRetrySuccess(retryId);
+                                              setToastMessage({ message: '✓ Solution retried successfully!', type: 'success' });
+                                              setTimeout(() => {
+                                                setRetrySuccess(null);
+                                                setToastMessage(null);
+                                              }, 3000);
+                                              await fetchHistory();
+                                            }
+                                          } catch (err: any) {
+                                            setRetryError({ id: retryId, message: `Network error: ${err.message}` });
+                                            setToastMessage({ message: `Network error: ${err.message}`, type: 'error' });
+                                            setTimeout(() => {
+                                              setRetryError(null);
+                                              setToastMessage(null);
+                                            }, 5000);
+                                          } finally {
+                                            setRetryingId(null);
+                                          }
+                                        }}
+                                        disabled={retryingId === retryId}
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-1"
+                                      >
+                                        {retryingId === retryId ? (
+                                          <>
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Retrying...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <RefreshCw className="w-3 h-3" />
+                                            Retry
+                                          </>
+                                        )}
+                                      </Button>
+                                    ) : null;
+                                  })()}
+
                                   {addressHistory.failureCount > 0 && (
                                     <button
                                       onClick={(e) => {
@@ -1614,23 +2223,74 @@ function MiningDashboardContent() {
                       <div>
                         <h3 className="text-lg font-semibold text-white mb-3">Failure Log</h3>
                         <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                          {selectedAddressHistory.failures.map((failure, idx) => (
-                            <div key={idx} className="p-3 bg-red-900/10 border border-red-700/50 rounded-lg">
-                              <div className="flex items-start justify-between gap-4 mb-2">
-                                <span className="text-xs text-gray-400">{formatDate(failure.ts)}</span>
-                                <span className="text-xs text-gray-500 font-mono">Nonce: {failure.nonce}</span>
-                              </div>
-                              <div className="text-sm text-red-300">
-                                <span className="text-red-400 font-semibold">Error: </span>
-                                {failure.error}
-                              </div>
-                              {failure.hash && (
-                                <div className="text-xs text-gray-500 font-mono mt-1">
-                                  Hash: {failure.hash}
+                          {selectedAddressHistory.failures.map((failure, idx) => {
+                            const failureId = `failure-${selectedAddressHistory.addressIndex}-${idx}`;
+                            return (
+                              <div key={idx} className="p-3 bg-red-900/10 border border-red-700/50 rounded-lg">
+                                <div className="flex items-start justify-between gap-4 mb-2">
+                                  <span className="text-xs text-gray-400">{formatDate(failure.ts)}</span>
+                                  <span className="text-xs text-gray-500 font-mono">Nonce: {failure.nonce}</span>
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                <div className="text-sm text-red-300">
+                                  <span className="text-red-400 font-semibold">Error: </span>
+                                  {failure.error}
+                                </div>
+                                {failure.hash && (
+                                  <div className="text-xs text-gray-500 font-mono mt-1">
+                                    Hash: {failure.hash}
+                                  </div>
+                                )}
+
+                                {/* Retry Button */}
+                                {isWithin24Hours(failure.ts) && (
+                                  <div className="mt-2">
+                                    <Button
+                                      onClick={() => retrySolution(
+                                        selectedAddressHistory.address,
+                                        selectedAddressHistory.challengeId,
+                                        failure.nonce,
+                                        failureId
+                                      )}
+                                      disabled={retryingId === failureId}
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {retryingId === failureId ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                          Retrying...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <RefreshCw className="w-3 h-3 mr-1" />
+                                          Retry Solution
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {/* Retry Success Message */}
+                                {retrySuccess === failureId && (
+                                  <div className="mt-2 p-2 bg-green-900/20 rounded text-xs">
+                                    <span className="text-green-400 font-semibold">✓ </span>
+                                    <span className="text-green-300">Solution retried successfully!</span>
+                                  </div>
+                                )}
+
+                                {/* Retry Error Message */}
+                                {retryError?.id === failureId && (
+                                  <div className="mt-2 p-2 bg-red-900/30 rounded text-xs">
+                                    <span className="text-red-400 font-semibold">Retry Failed: </span>
+                                    <pre className="text-red-300 mt-1 whitespace-pre-wrap break-all text-xs">
+                                      {retryError.message}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -2823,50 +3483,25 @@ function MiningDashboardContent() {
         {activeTab === 'consolidate' && (
           <div className="space-y-6">
             {/* Warning Banner */}
-            <Alert variant="warning" className="bg-gradient-to-r from-yellow-900/40 to-amber-900/40 border-2 border-yellow-600/60">
+            <Alert variant="info" className="bg-gradient-to-r from-blue-900/40 to-indigo-900/40 border-2 border-blue-600/60">
               <div className="flex items-start gap-4">
-                <AlertCircle className="w-8 h-8 text-yellow-400 flex-shrink-0 mt-1" />
-                <div className="space-y-3 flex-1">
+                <Info className="w-8 h-8 text-blue-400 flex-shrink-0 mt-1" />
+                <div className="space-y-2 flex-1">
                   <div>
-                    <h3 className="text-lg font-bold text-yellow-400 mb-2">⚠️ Feature Under Testing</h3>
+                    <h3 className="text-lg font-bold text-blue-400 mb-2">ℹ️ Consolidation Feature Available</h3>
                     <div className="space-y-2 text-sm text-gray-200 leading-relaxed">
                       <p>
-                        <strong>This consolidation feature has been fully implemented to the Midnight specification.</strong> The code is complete,
-                        transactions are being signed correctly, and we are receiving confirmations from the Midnight API.
+                        <strong>This consolidation feature has been fully implemented to the Midnight API specification.</strong> All transactions
+                        are properly signed and confirmed by the Midnight network.
                       </p>
                       <p>
-                        However, we are still awaiting <strong>final confirmation from Midnight</strong> and conducting <strong>additional testing</strong> to
-                        ensure everything works as expected in production. All consolidations are logged for verification.
+                        All consolidations are automatically logged and can be reviewed in your consolidation history. Use the "Download History"
+                        button to export your records at any time.
                       </p>
-                      <p className="text-yellow-300 font-semibold">
-                        We recommend waiting until testing is complete before using this feature.
+                      <p className="text-blue-300 font-semibold">
+                        Please note: Always verify the destination address before proceeding with consolidation.
                       </p>
                     </div>
-                  </div>
-                  <div className="pt-2 border-t border-yellow-700/30">
-                    <p className="text-xs text-gray-300">
-                      <strong>Updates will be announced on X:</strong>{' '}
-                      <a
-                        href="https://x.com/cwpaulm"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300 underline"
-                      >
-                        @cwpaulm
-                      </a>
-                      {' • '}
-                      <a
-                        href="https://x.com/PoolShamrock"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300 underline"
-                      >
-                        @PoolShamrock
-                      </a>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-2 italic">
-                      If you choose to use this feature now, you do so at your own discretion.
-                    </p>
                   </div>
                 </div>
               </div>
@@ -3059,222 +3694,12 @@ function MiningDashboardContent() {
                           }
                         }
 
-                        // Store the consolidation handler
-                        consolidateHandlerRef.current = async (password: string) => {
-                          setConsolidateLoading(true);
-                          consolidateRunningRef.current = true;
-                          setConsolidateResults([]);
-
-                          try {
-                            console.log('[Consolidate] Starting consolidation...');
-
-                          // Use addresses from addressesData (already loaded without password)
-                          if (!addressesData || !addressesData.addresses) {
-                            throw new Error('Addresses not loaded. Please refresh the page.');
-                          }
-
-                          const addresses = addressesData.addresses;
-                          console.log(`[Consolidate] Using ${addresses.length} addresses`);
-
-                          // Get destination address
-                          const destinationAddress = getDestinationAddress(addresses);
-                          if (!destinationAddress) {
-                            throw new Error('Invalid destination address');
-                          }
-
-                          // Fetch consolidation history to check which addresses have been consolidated
-                          const historyRecords = await fetchConsolidationHistory();
-
-                          // Initialize all addresses as pending (except destination in wallet mode)
-                          setConsolidateResults(addresses.map((addr: any) => {
-                            const addressHistory = historyRecords.filter((r: any) => r.sourceAddress === addr.bech32);
-                            return {
-                              index: addr.index,
-                              address: addr.bech32,
-                              status: (destinationMode === 'wallet' && addr.index === destinationAddressIndex) ? 'skipped' : 'pending',
-                              message: (destinationMode === 'wallet' && addr.index === destinationAddressIndex) ? 'Destination address' : '',
-                              consolidationHistory: addressHistory,
-                            };
-                          }));
-
-                          // Prepare addresses for batch signing (exclude destination)
-                          const addressesToSign = addresses.filter((addr: any) => {
-                            if (destinationMode === 'wallet' && addr.index === destinationAddressIndex) {
-                              return false;
-                            }
-                            if (destinationMode === 'custom' && addr.bech32 === destinationAddress) {
-                              return false;
-                            }
-                            return true;
-                          });
-
-                          console.log(`[Consolidate] Batch signing ${addressesToSign.length} addresses...`);
-
-                          // Batch sign all addresses at once
-                          const batchSignResponse = await fetch('/api/wallet/sign-batch', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              password,
-                              addresses: addressesToSign.map((addr: any) => ({
-                                sourceAddressIndex: addr.index,
-                                sourceAddress: addr.bech32,
-                                destinationAddress: destinationAddress,
-                              })),
-                            }),
-                          });
-
-                          const batchSignData = await batchSignResponse.json();
-                          if (!batchSignData.success) {
-                            throw new Error(batchSignData.error || 'Failed to sign messages');
-                          }
-
-                          // Create a map of signatures by address index for quick lookup
-                          const signatureMap = new Map(
-                            batchSignData.signatures.map((s: any) => [s.sourceAddressIndex, s.signature])
-                          );
-
-                          console.log(`[Consolidate] Batch signing complete. Starting submissions...`);
-
-                          // Continuous loop using ref
-                          let cycleCount = 0;
-                          while (consolidateRunningRef.current) {
-                            cycleCount++;
-                            console.log(`[Consolidate] Starting cycle ${cycleCount}`);
-
-                            let successCount = 0;
-                            let failCount = 0;
-                            let current = 0;
-                            const total = addressesToSign.length;
-
-                            for (const addr of addressesToSign) {
-                              // Check if user stopped using ref
-                              if (!consolidateRunningRef.current) break;
-
-                              current++;
-                              setConsolidateProgress({
-                                current,
-                                total,
-                                successCount,
-                                failCount,
-                                currentAddress: addr.bech32,
-                              });
-
-                              try {
-                                console.log(`[Consolidate] Submitting address ${addr.index}...`);
-
-                                const signature = signatureMap.get(addr.index);
-                                if (!signature) {
-                                  throw new Error('Signature not found for this address');
-                                }
-
-                                // Submit signature to Midnight API
-                                const donateResponse = await fetch('/api/consolidate/donate', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    sourceAddress: addr.bech32,
-                                    sourceIndex: addr.index,
-                                    destinationAddress: destinationAddress,
-                                    destinationIndex: destinationMode === 'wallet' ? destinationAddressIndex : undefined,
-                                    destinationMode,
-                                    signature,
-                                  }),
-                                });
-
-                                const donateData = await donateResponse.json();
-
-                                if (donateData.success) {
-                                  successCount++;
-
-                                  // Refresh consolidation history
-                                  const updatedHistory = await fetchConsolidationHistory();
-
-                                  setConsolidateResults(prev =>
-                                    prev.map(r => {
-                                      if (r.index === addr.index) {
-                                        const addressHistory = updatedHistory.filter((h: any) => h.sourceAddress === addr.bech32);
-                                        return {
-                                          ...r,
-                                          status: 'success',
-                                          message: donateData.message,
-                                          solutionsConsolidated: donateData.solutionsConsolidated,
-                                          consolidationHistory: addressHistory,
-                                        };
-                                      }
-                                      return r;
-                                    })
-                                  );
-                                } else {
-                                  failCount++;
-                                  setConsolidateResults(prev =>
-                                    prev.map(r =>
-                                      r.index === addr.index
-                                        ? { ...r, status: 'failed', message: donateData.error }
-                                        : r
-                                    )
-                                  );
-                                }
-                              } catch (err: any) {
-                                failCount++;
-                                console.error(`[Consolidate] Error for address ${addr.index}:`, err);
-                                setConsolidateResults(prev =>
-                                  prev.map(r =>
-                                    r.index === addr.index
-                                      ? { ...r, status: 'failed', message: err.message }
-                                      : r
-                                  )
-                                );
-                              }
-
-                              setConsolidateProgress({
-                                current,
-                                total,
-                                successCount,
-                                failCount,
-                                currentAddress: addr.bech32,
-                              });
-
-                              // 2 second delay between requests
-                              await new Promise(resolve => setTimeout(resolve, 2000));
-                            }
-
-                            console.log(`[Consolidate] Cycle ${cycleCount} complete. Success: ${successCount}, Failed: ${failCount}`);
-
-                            // Wait 5 seconds before next cycle (only if still running)
-                            if (consolidateRunningRef.current) {
-                              await new Promise(resolve => setTimeout(resolve, 5000));
-                            }
-                          }
-                        } catch (error: any) {
-                          console.error('[Consolidate] Error:', error);
-                          setConsolidateModal({
-                            open: true,
-                            type: 'error',
-                            title: 'Consolidation Error',
-                            message: error.message || 'An error occurred during consolidation.',
-                          });
-                        } finally {
-                          setConsolidateLoading(false);
-                          consolidateRunningRef.current = false;
-                          setConsolidateProgress(null);
-                        }
-                      };
-
-                      // Show password modal
-                      setModalPassword('');
-                      modalPasswordRef.current = '';
-                      setConsolidateModal({
+                        // Show mode selection modal first
+                        setConsolidateModal({
                           open: true,
-                          type: 'password',
-                          title: 'Start Continuous Consolidation',
-                          message: 'Enter your wallet password to begin consolidating rewards from all addresses.',
-                          requirePassword: true,
-                          onConfirm: async () => {
-                            if (consolidateHandlerRef.current && modalPasswordRef.current) {
-                              await consolidateHandlerRef.current(modalPasswordRef.current);
-                            }
-                          },
+                          type: 'mode-select',
+                          title: 'Choose Consolidation Mode',
+                          message: 'Select which addresses to consolidate:',
                         });
                       }}
                       disabled={consolidateLoading}
@@ -3352,10 +3777,42 @@ function MiningDashboardContent() {
             {/* Address Table */}
             <Card variant="bordered">
               <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <MapPin className="w-5 h-5 text-blue-400" />
-                  Address Status ({consolidateResults.length} addresses)
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-blue-400" />
+                    Address Status ({consolidateResults.length} addresses)
+                  </CardTitle>
+                  {consolidateResults.length > 0 && (
+                    <Button
+                      onClick={() => {
+                        // Download consolidation history as JSON
+                        const history = consolidateResults.map(r => ({
+                          timestamp: new Date().toISOString(),
+                          addressIndex: r.index,
+                          address: r.address,
+                          status: r.status,
+                          message: r.message,
+                          solutionsConsolidated: r.solutionsConsolidated || 0,
+                        }));
+
+                        const json = JSON.stringify(history, null, 2);
+                        const blob = new Blob([json], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `consolidation-history-${Date.now()}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Download History
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
@@ -3682,19 +4139,337 @@ function MiningDashboardContent() {
           </div>
         )}
 
-        {/* Logs Tab */}
-        {activeTab === 'logs' && (
+        {/* Diagnostics Tab */}
+        {activeTab === 'diagnostics' && (
           <div className="space-y-6">
+            {/* Version & System Info Card */}
+            <Card variant="bordered" className="bg-gradient-to-br from-gray-900/40 to-gray-800/20">
+              <CardContent className="p-4">
+                <div className="space-y-4">
+                  {/* Version Info */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Info className="w-5 h-5 text-blue-400" />
+                      <div>
+                        <p className="text-sm font-semibold text-white">Application Version</p>
+                        <p className="text-xs text-gray-400" id="version-info">Loading...</p>
+                        <p className="text-xs mt-1" id="update-status"></p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const loadVersion = async () => {
+                          try {
+                            const response = await fetch('/api/version?checkUpdate=true');
+                            const data = await response.json();
+                            const versionEl = document.getElementById('version-info');
+                            const storageEl = document.getElementById('storage-path');
+                            const secureEl = document.getElementById('secure-path');
+                            const updateEl = document.getElementById('update-status');
+                            if (data.success) {
+                              if (versionEl) versionEl.textContent = `v${data.version}-${data.commit} | ${data.branch} | Built: ${new Date(data.buildDate).toLocaleString()}`;
+                              if (storageEl) storageEl.textContent = data.storagePath;
+                              if (secureEl) secureEl.textContent = data.securePath;
+                              if (updateEl && data.updateCheck) {
+                                if (data.updateCheck.updateAvailable) {
+                                  const behindText = data.updateCheck.commitsBehind > 0 ? ` (${data.updateCheck.commitsBehind} commits behind)` : '';
+                                  updateEl.innerHTML = `<span class="text-yellow-400">⚠️ Update available${behindText}</span><br><span class="text-xs text-gray-400">Latest: ${data.updateCheck.latestCommit} | Your version: ${data.updateCheck.currentCommit}</span>`;
+                                } else {
+                                  updateEl.innerHTML = `<span class="text-green-400">✓ Up to date</span>`;
+                                }
+                              }
+                            }
+                          } catch (err) {
+                            console.error('Failed to fetch version:', err);
+                          }
+                        };
+                        await loadVersion();
+                      }}
+                      className="text-xs px-3 py-1 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3 inline mr-1" />
+                      Refresh
+                    </button>
+                  </div>
+
+                  {/* Storage Locations */}
+                  <div className="border-t border-gray-700 pt-3 space-y-2">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Storage Location (receipts, errors):</p>
+                      <p className="text-xs font-mono text-white bg-black/30 p-2 rounded" id="storage-path">Loading...</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Secure Location (wallet, dev fee cache):</p>
+                      <p className="text-xs font-mono text-white bg-black/30 p-2 rounded" id="secure-path">Loading...</p>
+                    </div>
+                    <p className="text-xs text-gray-500 italic">
+                      💡 Old users: Files may be in installation folder. New users: Files in Documents/MidnightFetcherBot
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card variant="bordered">
+              <CardHeader>
+                <CardTitle className="text-2xl flex items-center gap-2">
+                  <Activity className="w-6 h-6 text-blue-400" />
+                  System Diagnostics & Logs
+                </CardTitle>
+                <CardDescription>
+                  Test API connectivity, diagnose issues, and view mining logs
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Test Controls */}
+                <div className="space-y-4">
+                  <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                    <h3 className="text-sm font-semibold text-blue-400 mb-2">Test Configuration</h3>
+                    <p className="text-sm text-gray-400 mb-4">
+                      Provide your wallet password to enable full endpoint testing including registration and solution submission tests.
+                    </p>
+                    <div className="flex gap-3 items-end">
+                      <div className="flex-1">
+                        <label className="text-xs text-gray-400 mb-2 block">
+                          Wallet Password (optional - for registration/submission tests)
+                        </label>
+                        <input
+                          type="password"
+                          value={diagnosticsPassword}
+                          onChange={(e) => setDiagnosticsPassword(e.target.value)}
+                          placeholder="Enter password for full tests..."
+                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          disabled={diagnosticsRunning}
+                        />
+                      </div>
+                      <Button
+                        onClick={async () => {
+                          setDiagnosticsRunning(true);
+                          setDiagnosticsResults(null);
+                          try {
+                            const response = await fetch('/api/diagnostics/test-endpoints', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                password: diagnosticsPassword || undefined,
+                                testAddressIndex: 0
+                              })
+                            });
+                            const data = await response.json();
+                            setDiagnosticsResults(data);
+                          } catch (error: any) {
+                            setDiagnosticsResults({
+                              success: false,
+                              error: error.message,
+                              results: []
+                            });
+                          } finally {
+                            setDiagnosticsRunning(false);
+                          }
+                        }}
+                        disabled={diagnosticsRunning}
+                        variant="primary"
+                        size="lg"
+                      >
+                        {diagnosticsRunning ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Running Tests...
+                          </>
+                        ) : (
+                          <>
+                            <Activity className="w-4 h-4" />
+                            Run Diagnostics
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Results Display */}
+                  {diagnosticsResults && (
+                    <div className="space-y-4">
+                      {/* Summary Card */}
+                      {diagnosticsResults.summary && (
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          <div className="p-4 bg-gray-800 rounded-lg">
+                            <p className="text-xs text-gray-400 mb-1">Total Tests</p>
+                            <p className="text-2xl font-bold text-white">{diagnosticsResults.summary.totalTests}</p>
+                          </div>
+                          <div className="p-4 bg-green-900/20 border border-green-700/50 rounded-lg">
+                            <p className="text-xs text-gray-400 mb-1">Successful</p>
+                            <p className="text-2xl font-bold text-green-400">{diagnosticsResults.summary.successful}</p>
+                          </div>
+                          <div className="p-4 bg-red-900/20 border border-red-700/50 rounded-lg">
+                            <p className="text-xs text-gray-400 mb-1">Failed</p>
+                            <p className="text-2xl font-bold text-red-400">{diagnosticsResults.summary.failed}</p>
+                          </div>
+                          <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                            <p className="text-xs text-gray-400 mb-1">Health</p>
+                            <p className="text-2xl font-bold text-blue-400">{diagnosticsResults.summary.healthPercentage}%</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Test Results */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-lg font-semibold text-white">Test Results</h3>
+                          <Button
+                            onClick={() => {
+                              const resultsText = JSON.stringify(diagnosticsResults, null, 2);
+                              navigator.clipboard.writeText(resultsText);
+                            }}
+                            variant="outline"
+                            size="sm"
+                          >
+                            <Copy className="w-4 h-4 mr-2" />
+                            Copy Full Report
+                          </Button>
+                        </div>
+
+                        {diagnosticsResults.results?.map((result: any, index: number) => (
+                          <div
+                            key={index}
+                            className={cn(
+                              'p-4 rounded-lg border',
+                              result.success
+                                ? 'bg-green-900/10 border-green-700/50'
+                                : result.error?.includes('Skipped')
+                                ? 'bg-gray-800/50 border-gray-700'
+                                : 'bg-red-900/10 border-red-700/50'
+                            )}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center gap-3">
+                                {result.success ? (
+                                  <CheckCircle2 className="w-5 h-5 text-green-400" />
+                                ) : result.error?.includes('Skipped') ? (
+                                  <Info className="w-5 h-5 text-gray-400" />
+                                ) : (
+                                  <XCircle className="w-5 h-5 text-red-400" />
+                                )}
+                                <div>
+                                  <p className="font-semibold text-white">{result.endpoint}</p>
+                                  <p className="text-xs text-gray-400">
+                                    {result.method}
+                                    {result.endpoint === 'POST /solution' && result.success && ' - Endpoint reachable'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                {result.statusCode && (
+                                  <p className={cn(
+                                    "text-sm font-mono font-semibold",
+                                    result.success ? "text-green-400" : "text-red-400"
+                                  )}>
+                                    {result.statusCode}
+                                  </p>
+                                )}
+                                {result.responseTime && (
+                                  <p className="text-xs text-gray-400">{result.responseTime}ms</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {result.error && (
+                              <div className="mt-2 p-3 bg-black/30 rounded border border-gray-700">
+                                <p className="text-xs font-semibold text-red-400 mb-1">Error:</p>
+                                <p className="text-xs font-mono text-gray-300 break-all">{result.error}</p>
+                              </div>
+                            )}
+
+                            {result.responseData && !result.error?.includes('Skipped') && (
+                              <details className="mt-2">
+                                <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">
+                                  View Response Data
+                                </summary>
+                                <div className="mt-2 p-3 bg-black/30 rounded border border-gray-700">
+                                  <pre className="text-xs font-mono text-gray-300 overflow-auto max-h-48">
+                                    {JSON.stringify(result.responseData, null, 2)}
+                                  </pre>
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Diagnostic Info */}
+                      {diagnosticsResults.diagnosticInfo && (
+                        <div className="p-4 bg-gray-800 rounded-lg">
+                          <h3 className="text-sm font-semibold text-gray-400 mb-3">Diagnostic Information</h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Wallet Loaded:</span>
+                              <span className={diagnosticsResults.diagnosticInfo.walletLoaded ? "text-green-400" : "text-red-400"}>
+                                {diagnosticsResults.diagnosticInfo.walletLoaded ? 'Yes' : 'No'}
+                              </span>
+                            </div>
+                            {diagnosticsResults.diagnosticInfo.testAddress && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Test Address Index:</span>
+                                  <span className="text-white font-mono">{diagnosticsResults.diagnosticInfo.testAddress.index}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Test Address:</span>
+                                  <span className="text-white font-mono text-xs">{diagnosticsResults.diagnosticInfo.testAddress.bech32.slice(0, 20)}...</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Address Registered:</span>
+                                  <span className={diagnosticsResults.diagnosticInfo.testAddress.registered ? "text-green-400" : "text-yellow-400"}>
+                                    {diagnosticsResults.diagnosticInfo.testAddress.registered ? 'Yes' : 'No'}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                            {diagnosticsResults.diagnosticInfo.averageLatency && (
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Average Latency:</span>
+                                <span className={cn(
+                                  "font-semibold",
+                                  diagnosticsResults.diagnosticInfo.averageLatency < 1000 ? "text-green-400" :
+                                  diagnosticsResults.diagnosticInfo.averageLatency < 2000 ? "text-yellow-400" :
+                                  "text-red-400"
+                                )}>
+                                  {diagnosticsResults.diagnosticInfo.averageLatency}ms
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Copy Instructions */}
+                      <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-semibold text-blue-400 mb-1">Share with Support</p>
+                            <p className="text-xs text-gray-400">
+                              If you're experiencing issues, click "Copy Full Report" above and share the results with our support team.
+                              This will help us diagnose and resolve your problem quickly.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Mining Logs Section */}
             <Card variant="bordered">
               <CardHeader>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-xl flex items-center gap-2">
                       <Terminal className="w-5 h-5 text-blue-400" />
-                      Mining Log
+                      Mining Logs
                     </CardTitle>
                     <div className="flex items-center gap-2">
-                      {/* Follow/Unfollow Toggle */}
                       <Button
                         variant={autoFollow ? "default" : "ghost"}
                         size="sm"
@@ -3706,7 +4481,6 @@ function MiningDashboardContent() {
                         <span className="text-xs">{autoFollow ? 'Following' : 'Paused'}</span>
                       </Button>
 
-                      {/* Size Toggle */}
                       <div className="flex gap-1 bg-gray-800 rounded p-1">
                         <button
                           onClick={() => setLogHeight('small')}
@@ -3740,7 +4514,6 @@ function MiningDashboardContent() {
                         </button>
                       </div>
 
-                      {/* Collapse Toggle */}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -4022,6 +4795,81 @@ function MiningDashboardContent() {
         <div className="space-y-4">
           <p className="text-gray-300 whitespace-pre-line">{consolidateModal.message}</p>
 
+          {consolidateModal.type === 'mode-select' && (
+            <div className="space-y-4">
+              {/* Checkbox for including next 10 unused addresses */}
+              <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeNextUnused}
+                    onChange={(e) => setIncludeNextUnused(e.target.checked)}
+                    className="mt-1 w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-200">Include next 10 unused addresses</div>
+                    <div className="text-sm text-gray-400 mt-1">
+                      Consolidate from the selected addresses <strong>plus</strong> the next 10 unused addresses.
+                      This helps catch any new rewards that may have been earned on upcoming addresses.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <button
+                onClick={async () => {
+                  setConsolidateMode('receipts');
+                  setConsolidateModal(prev => ({ ...prev, open: false }));
+                  // Small delay to let modal close, then start consolidation
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                  // Trigger password modal for receipts mode
+                  startConsolidationFlow('receipts', includeNextUnused);
+                }}
+                className="w-full p-4 bg-blue-500/20 border-2 border-blue-500 rounded-lg text-left hover:bg-blue-500/30 transition-all group"
+              >
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold text-blue-400 mb-1">Addresses with Receipts (Recommended)</div>
+                    <div className="text-sm text-gray-400">
+                      Only consolidate addresses that have tracked receipts. This is faster and more efficient.
+                      {addressesData?.addresses && (
+                        <span className="block mt-1 text-blue-300 font-medium">
+                          ~{addressesData.addresses.length} addresses
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={async () => {
+                  setConsolidateMode('all-registered');
+                  setConsolidateModal(prev => ({ ...prev, open: false }));
+                  // Small delay to let modal close, then start consolidation
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                  // Trigger password modal for all-registered mode
+                  startConsolidationFlow('all-registered', includeNextUnused);
+                }}
+                className="w-full p-4 bg-purple-500/20 border-2 border-purple-500 rounded-lg text-left hover:bg-purple-500/30 transition-all group"
+              >
+                <div className="flex items-start gap-3">
+                  <Zap className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold text-purple-400 mb-1">All Registered Addresses (Thorough)</div>
+                    <div className="text-sm text-gray-400">
+                      Consolidate all 200 registered addresses in your wallet. Slower but ensures no rewards are missed.
+                      <span className="block mt-1 text-yellow-400 font-medium">
+                        ⏱ May take 10-15 minutes
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
+
           {consolidateModal.type === 'password' && (
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -4047,7 +4895,16 @@ function MiningDashboardContent() {
           )}
 
           <div className="flex gap-3 justify-end">
-            {consolidateModal.type === 'confirm' || consolidateModal.type === 'password' ? (
+            {consolidateModal.type === 'mode-select' ? (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setConsolidateModal(prev => ({ ...prev, open: false }));
+                }}
+              >
+                Cancel
+              </Button>
+            ) : consolidateModal.type === 'confirm' || consolidateModal.type === 'password' ? (
               <>
                 <Button
                   variant="ghost"
